@@ -7,7 +7,7 @@ import { Select } from '../components/ui/Select';
 import { Modal } from '../components/ui/Modal';
 import { CalendarPicker } from '../components/ui/CalendarPicker';
 import { TaskCard } from '../components/TaskCard';
-import { MessageCircle, Plus, Edit2, Trash2, Loader2, Check, Bell, Home } from 'lucide-react';
+import { MessageCircle, Plus, Edit2, Trash2, Loader2, Check, Bell, Home, LogOut } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { cn } from '../utils/cn';
 import { useAuthActions } from '../utils/auth';

@@ -14,7 +14,7 @@ function slug(username) {
   return username.normalize('NFD').replace(/[̀-ͯ]/g, '')
     .toLowerCase().replace(/[^a-z0-9]/g, '');
 }
-const emailFor = (u) => `${slug(u)}@mghogar.local`;
+const emailFor = (u) => `${slug(u)}@mghogar.com`;
 
 // Usuarios existentes + sus contraseñas nuevas (definidas por el dueño).
 const SEED = [

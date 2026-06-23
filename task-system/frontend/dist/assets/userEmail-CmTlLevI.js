@@ -1,0 +1,1 @@
+function e(e){return(e||``).normalize(`NFD`).replace(/[̀-ͯ]/g,``).toLowerCase().replace(/[^a-z0-9]/g,``)}var t=t=>`${e(t)}@mghogar.local`;export{t};

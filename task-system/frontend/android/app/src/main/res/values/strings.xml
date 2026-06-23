@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">MG Hogar</string>
+    <string name="title_activity_main">MG Hogar</string>
+    <string name="package_name">com.mghogar.tareas</string>
+    <string name="custom_url_scheme">com.mghogar.tareas</string>
+</resources>

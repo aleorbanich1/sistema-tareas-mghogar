@@ -1,0 +1,8 @@
+{
+  "appId": "com.mghogar.tareas",
+  "appName": "MG Hogar",
+  "webDir": "dist",
+  "android": {
+    "allowMixedContent": true
+  }
+}

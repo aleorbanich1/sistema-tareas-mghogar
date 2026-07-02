@@ -12,6 +12,8 @@ import { cn } from '../utils/cn';
 import { CalendarPicker } from '../components/ui/CalendarPicker';
 import { useAuthActions } from '../utils/auth';
 import ChatPanel from '../components/ChatPanel';
+import { ensureNotificationPermission, armAudioUnlock, notify } from '../utils/notifications';
+import { useTaskReminders } from '../utils/useTaskNotifications';
 
 // Componente para Formulario de Tarea (adaptado para el empleado)
 const TaskFormModal = ({ isOpen, onClose, initialTask, employees, onSave, user }) => {
@@ -89,14 +91,6 @@ const TaskFormModal = ({ isOpen, onClose, initialTask, employees, onSave, user }
               <option value="P2">P2 - Alta</option>
               <option value="P3">P3 - Normal</option>
               <option value="P4">P4 - Baja</option>
-            </Select>
-          </div>
-          <div className="flex flex-col gap-2">
-            <label className="text-sm font-semibold text-slate-700 dark:text-slate-300">Asignar a</label>
-            <Select value={formData.assigned_to} onChange={e => setFormData({...formData, assigned_to: e.target.value})}>
-              <option value="">Sin asignar</option>
-              {user && user.id && <option value={user.id}>Para mí</option>}
-              {employees && employees.map(e => <option key={e.id} value={e.id}>{e.full_name}</option>)}
             </Select>
           </div>
           <div className="flex flex-col gap-2">
@@ -251,6 +245,15 @@ export default function EmpleadoDashboard() {
   const [currentTaskToEdit, setCurrentTaskToEdit] = useState(null);
   const [currentTaskIdToDelete, setCurrentTaskIdToDelete] = useState(null);
 
+  // Notificaciones: pedir permiso y preparar el sonido (se desbloquea al primer toque).
+  useEffect(() => {
+    ensureNotificationPermission();
+    armAudioUnlock();
+  }, []);
+
+  // Recordatorios locales (X minutos antes del horario) para tareas propias/asignadas.
+  useTaskReminders(tasks, user.id);
+
   useEffect(() => {
     loadTasks();
     loadEmployees();
@@ -258,6 +261,10 @@ export default function EmpleadoDashboard() {
     // WebSocket real-time updates
     const onCreated = (task) => {
       if (Number(task.assigned_to) !== Number(user.id)) return;
+      // Aviso con sonido cuando otra persona (ej. Alejandro) me asigna una tarea.
+      if (task.creator && Number(task.creator.id) !== Number(user.id)) {
+        notify('📋 Nueva tarea', `${task.creator.full_name} te asignó: ${task.title}`, { tag: `new-task-${task.id}` });
+      }
       setTasks(prev => {
         const idx = prev.findIndex(t => t.id === task.id || (t.uuid && t.uuid === task.uuid));
         if (idx >= 0) { const next = [...prev]; next[idx] = task; return next; }
@@ -393,7 +400,7 @@ export default function EmpleadoDashboard() {
       const body = {
         title: formData.title,
         priority: formData.priority,
-        assigned_to: formData.assigned_to ? Number(formData.assigned_to) : null,
+        assigned_to: Number(user.id),
         description: formData.description,
         due_date: formData.due_date || null,
         recurrence_time: formData.recurrence_time || null,
@@ -405,7 +412,7 @@ export default function EmpleadoDashboard() {
 
       const saved = currentTaskId
         ? await api(`/tasks/${currentTaskId}`, { method: 'PATCH', body })
-        : await api('/tasks', { method: 'POST', body });
+        : await api('/tasks/self', { method: 'POST', body });
       setTaskModalOpen(false);
       upsertTaskInState(saved);
       loadTasks({ silent: true });
@@ -503,18 +510,24 @@ export default function EmpleadoDashboard() {
                   onComplete={handleComplete}
                   onAction={(t) => (
                     <>
-                      <Button variant="secondary" size="sm" className="w-10 px-0" onClick={() => {
-                        setCurrentTaskToEdit(t);
-                        setTaskModalOpen(true);
-                      }}>
-                        <Edit2 size={16} />
-                      </Button>
-                      <Button variant="danger" size="sm" className="w-10 px-0" onClick={() => {
-                        setCurrentTaskIdToDelete(t.id);
-                        setDeleteModalOpen(true);
-                      }}>
-                        <Trash2 size={16} />
-                      </Button>
+                      {/* Editar/Eliminar SOLO en tareas que creó el propio empleado.
+                          Las que asigna el jefe (creator distinto) no se pueden tocar. */}
+                      {Number(t.creator?.id) === Number(user.id) && (
+                        <>
+                          <Button variant="secondary" size="sm" className="w-10 px-0" onClick={() => {
+                            setCurrentTaskToEdit(t);
+                            setTaskModalOpen(true);
+                          }}>
+                            <Edit2 size={16} />
+                          </Button>
+                          <Button variant="danger" size="sm" className="w-10 px-0" onClick={() => {
+                            setCurrentTaskIdToDelete(t.id);
+                            setDeleteModalOpen(true);
+                          }}>
+                            <Trash2 size={16} />
+                          </Button>
+                        </>
+                      )}
                       {!['done', 'failed'].includes(t.status) && (
                         <>
                           <Button 

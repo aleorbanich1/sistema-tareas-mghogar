@@ -46,7 +46,19 @@
       "Bash(export ANDROID_HOME='')",
       "Bash(nohup node server.js)",
       "Bash(taskkill //F //PID 21720)",
-      "Bash(grep -rhoE \"api\\\\\\('[^']*'|api\\\\\\(\\\\`[^\\\\`]*\\\\`\" pages/ components/)"
+      "Bash(grep -rhoE \"api\\\\\\('[^']*'|api\\\\\\(\\\\`[^\\\\`]*\\\\`\" pages/ components/)",
+      "Bash(ls *.sql migrations)",
+      "Bash(sed 's/=.*/=***/' .env)",
+      "Bash(node -e ' *)",
+      "Bash(npx vite *)",
+      "Bash(echo \"EXIT: $?\")",
+      "Bash(cat _redirects)",
+      "Bash(grep -l \"qsewancpibyyakitwpnr\" assets/*.js)",
+      "Bash(grep -l \"sb_publishable_4DR0EOen\" assets/*.js)",
+      "Bash(git fetch *)",
+      "Bash(git ls-tree *)",
+      "Bash(node --input-type=module -e ' *)",
+      "Bash(xargs grep -l \"export.*api\\\\|export default\")"
     ],
     "additionalDirectories": [
       "c:\\c\\SYB\\task-system\\frontend\\src\\utils"

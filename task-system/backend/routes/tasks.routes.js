@@ -19,9 +19,12 @@ router.use(auth);
 router.get('/',     listTasks);
 router.get('/:id',  getTask);
 
-// Only socio/jefe can create tasks for others or delete tasks
+// Only socio/jefe can create tasks for others
 router.post('/',        role('socio', 'jefe'), createTask);
-router.delete('/:id',   role('socio', 'jefe'), deleteTask);
+
+// Delete allowed for socio/jefe (any task) and empleado (own tasks only);
+// deleteTask enforces the empleado ownership check internally.
+router.delete('/:id',   deleteTask);
 
 // Empleado can create tasks for themselves only
 router.post('/self',    role('empleado'), createSelfTask);

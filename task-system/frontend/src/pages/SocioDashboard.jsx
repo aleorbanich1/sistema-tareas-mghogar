@@ -7,11 +7,31 @@ import { Select } from '../components/ui/Select';
 import { Modal } from '../components/ui/Modal';
 import { CalendarPicker } from '../components/ui/CalendarPicker';
 import { TaskCard } from '../components/TaskCard';
-import { MessageCircle, Plus, Edit2, Trash2, Loader2, Check, Bell, Home, LogOut } from 'lucide-react';
+import { MessageCircle, Plus, Edit2, Trash2, Loader2, Check, Bell, Home, LogOut, UserPlus, X, Clock } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { cn } from '../utils/cn';
 import { useAuthActions } from '../utils/auth';
+import { supabase } from '../utils/supabaseClient';
 import ChatPanel from '../components/ChatPanel';
+
+// Iniciales para el avatar del registro (ej. "Olivia Sterling" → "OS").
+function initials(name = '') {
+  const parts = name.trim().split(/\s+/).filter(Boolean);
+  return ((parts[0]?.[0] || '') + (parts[1]?.[0] || '')).toUpperCase() || '?';
+}
+
+// Tiempo relativo corto en español.
+function timeAgo(iso) {
+  if (!iso) return '';
+  const diff = Math.max(0, Date.now() - new Date(iso).getTime());
+  const min = Math.floor(diff / 60000);
+  if (min < 1) return 'recién';
+  if (min < 60) return `hace ${min} min`;
+  const h = Math.floor(min / 60);
+  if (h < 24) return `hace ${h} h`;
+  const d = Math.floor(h / 24);
+  return d === 1 ? 'hace 1 día' : `hace ${d} días`;
+}
 
 // Optimizacion: Componente separado para evitar re-render del dashboard
 const TaskFormModal = memo(({ isOpen, onClose, initialTask, employees, onSave, user }) => {
@@ -231,10 +251,18 @@ export default function SocioDashboard() {
   const navigate = useNavigate();
   const { logout } = useAuthActions();
   const user = JSON.parse(localStorage.getItem('mg_user') || '{}');
-  
+  const isJefe = user.role === 'jefe';
+
   const [tasks, setTasks] = useState([]);
   const [employees, setEmployees] = useState([]);
   const [loading, setLoading] = useState(true);
+
+  // Registros pendientes (solo jefe)
+  const [pendingRegs, setPendingRegs] = useState([]);
+  const [regsModalOpen, setRegsModalOpen] = useState(false);
+  const [regsLoading, setRegsLoading] = useState(false);
+  const [regBusyId, setRegBusyId] = useState(null);
+  const [confirmRejectId, setConfirmRejectId] = useState(null);
   
   // Filters
   const [activeTab, setActiveTab] = useState('activas'); // 'activas' | 'historial'
@@ -249,7 +277,53 @@ export default function SocioDashboard() {
 
   useEffect(() => {
     loadEmployees();
+    if (isJefe) loadPendingRegs();
   }, []);
+
+  const loadPendingRegs = async () => {
+    if (!isJefe) return;
+    setRegsLoading(true);
+    try {
+      const { data, error } = await supabase
+        .from('pending_registrations')
+        .select('id, full_name, username, created_at')
+        .order('created_at', { ascending: true });
+      if (error) throw error;
+      setPendingRegs(data || []);
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setRegsLoading(false);
+    }
+  };
+
+  const approveReg = async (id) => {
+    setRegBusyId(id);
+    try {
+      const { error } = await supabase.rpc('approve_registration', { p_id: id });
+      if (error) throw error;
+      setPendingRegs(prev => prev.filter(r => r.id !== id));
+      loadEmployees(); // el nuevo empleado ya queda disponible para asignar
+    } catch (err) {
+      alert(err.message || 'No se pudo aprobar');
+    } finally {
+      setRegBusyId(null);
+    }
+  };
+
+  const rejectReg = async (id) => {
+    setRegBusyId(id);
+    try {
+      const { error } = await supabase.rpc('reject_registration', { p_id: id });
+      if (error) throw error;
+      setPendingRegs(prev => prev.filter(r => r.id !== id));
+    } catch (err) {
+      alert(err.message || 'No se pudo rechazar');
+    } finally {
+      setRegBusyId(null);
+      setConfirmRejectId(null);
+    }
+  };
 
   useEffect(() => {
     loadTasks();
@@ -385,12 +459,29 @@ export default function SocioDashboard() {
             Hola, <span className="text-slate-900 dark:text-slate-200">{user.full_name}</span>
           </p>
         </div>
-        <button 
-          onClick={handleLogout}
-          className="p-2 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 rounded-full transition-colors"
-        >
-          <LogOut size={20} />
-        </button>
+        <div className="flex items-center gap-2">
+          {isJefe && (
+            <button
+              onClick={() => { setRegsModalOpen(true); loadPendingRegs(); }}
+              aria-label="Registros pendientes"
+              className="relative p-2 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 rounded-full transition-colors"
+            >
+              <UserPlus size={20} />
+              {pendingRegs.length > 0 && (
+                <span className="absolute -top-0.5 -right-0.5 min-w-[18px] h-[18px] px-1 rounded-full bg-emerald-500 text-white text-[10px] font-bold flex items-center justify-center tabular-nums ring-2 ring-slate-50 dark:ring-slate-950">
+                  {pendingRegs.length}
+                </span>
+              )}
+            </button>
+          )}
+          <button
+            onClick={handleLogout}
+            aria-label="Cerrar sesión"
+            className="p-2 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 rounded-full transition-colors"
+          >
+            <LogOut size={20} />
+          </button>
+        </div>
       </header>
 
       {/* Stats Quick View (Simplified) */}
@@ -525,6 +616,94 @@ export default function SocioDashboard() {
           <Button variant="danger" className="flex-1" onClick={confirmDelete}>Eliminar</Button>
         </div>
       </Modal>
+
+      {/* Registros pendientes (solo jefe) */}
+      {isJefe && (
+        <Modal
+          isOpen={regsModalOpen}
+          onClose={() => { setRegsModalOpen(false); setConfirmRejectId(null); }}
+          title="Registros pendientes"
+        >
+          {regsLoading ? (
+            <div className="flex flex-col gap-3" aria-hidden="true">
+              {[0, 1, 2].map(i => (
+                <div key={i} className="flex items-center gap-3 py-3 animate-pulse">
+                  <div className="w-10 h-10 rounded-full bg-slate-200 dark:bg-slate-800 shrink-0" />
+                  <div className="flex-1 flex flex-col gap-2">
+                    <div className="h-3 w-1/2 rounded bg-slate-200 dark:bg-slate-800" />
+                    <div className="h-2.5 w-1/3 rounded bg-slate-200 dark:bg-slate-800" />
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : pendingRegs.length === 0 ? (
+            <div className="text-center py-10">
+              <div className="inline-flex w-14 h-14 rounded-2xl bg-slate-100 dark:bg-slate-800 items-center justify-center text-slate-400 mb-4">
+                <Clock size={26} />
+              </div>
+              <p className="text-sm font-medium text-slate-600 dark:text-slate-300">No hay registros pendientes</p>
+              <p className="text-xs text-slate-400 mt-1">Cuando alguien se registre, va a aparecer acá para aprobar.</p>
+            </div>
+          ) : (
+            <div className="flex flex-col max-h-[60vh] overflow-y-auto -mx-1 px-1">
+              <AnimatePresence initial={false}>
+                {pendingRegs.map(r => {
+                  const busy = regBusyId === r.id;
+                  const confirming = confirmRejectId === r.id;
+                  return (
+                    <motion.div
+                      key={r.id}
+                      layout
+                      initial={{ opacity: 0, y: 8 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      exit={{ opacity: 0, height: 0, marginTop: 0 }}
+                      transition={{ type: 'spring', stiffness: 200, damping: 26 }}
+                      className="flex items-center gap-3 py-3 border-t border-slate-100 dark:border-slate-800 first:border-t-0"
+                    >
+                      <div className="w-10 h-10 rounded-full bg-emerald-50 dark:bg-emerald-900/20 text-emerald-700 dark:text-emerald-400 flex items-center justify-center shrink-0 text-sm font-bold">
+                        {initials(r.full_name)}
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <p className="text-sm font-semibold text-slate-900 dark:text-slate-50 truncate">{r.full_name}</p>
+                        <p className="text-xs text-slate-500 dark:text-slate-400 truncate">
+                          @{r.username} · {timeAgo(r.created_at)}
+                        </p>
+                      </div>
+
+                      {confirming ? (
+                        <div className="flex items-center gap-2 shrink-0">
+                          <Button size="sm" variant="danger" disabled={busy} onClick={() => rejectReg(r.id)}>
+                            {busy ? <Loader2 size={16} className="animate-spin" /> : 'Rechazar'}
+                          </Button>
+                          <Button size="sm" variant="secondary" disabled={busy} onClick={() => setConfirmRejectId(null)}>
+                            No
+                          </Button>
+                        </div>
+                      ) : (
+                        <div className="flex items-center gap-2 shrink-0">
+                          <Button size="sm" className="px-3" disabled={busy} onClick={() => approveReg(r.id)}>
+                            {busy ? <Loader2 size={16} className="animate-spin" /> : (<><Check size={16} className="mr-1" /> Aprobar</>)}
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="secondary"
+                            className="w-11 px-0 text-red-600 dark:text-red-400"
+                            disabled={busy}
+                            aria-label={`Rechazar a ${r.full_name}`}
+                            onClick={() => setConfirmRejectId(r.id)}
+                          >
+                            <X size={16} />
+                          </Button>
+                        </div>
+                      )}
+                    </motion.div>
+                  );
+                })}
+              </AnimatePresence>
+            </div>
+          )}
+        </Modal>
+      )}
 
       {/* Chat Flotante */}
       <ChatPanel />

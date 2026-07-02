@@ -28,8 +28,13 @@ export default function Login() {
 
       const { data: profile, error: pErr } = await supabase
         .from('users').select('id, username, full_name, role')
-        .eq('auth_id', data.user.id).single();
-      if (pErr || !profile) throw new Error('No se encontró el perfil del usuario');
+        .eq('auth_id', data.user.id).maybeSingle();
+      if (pErr) throw new Error('No se pudo verificar el perfil del usuario');
+      // Sin perfil = cuenta creada pero todavía no aprobada por el jefe.
+      if (!profile) {
+        await supabase.auth.signOut();
+        throw new Error('Tu cuenta está pendiente de aprobación por el jefe.');
+      }
 
       login(data.session.access_token, profile);
       navigate(`/${profile.role}`, { replace: true });

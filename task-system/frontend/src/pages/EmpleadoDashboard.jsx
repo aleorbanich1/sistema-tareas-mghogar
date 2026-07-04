@@ -16,39 +16,32 @@ import { ensureNotificationPermission, armAudioUnlock, notify, playPop } from '.
 import { useTaskReminders } from '../utils/useTaskNotifications';
 import { initReminders, syncReminders } from '../utils/reminders';
 import { REMINDER_UNITS, toReminderSeconds, fromReminderSeconds } from '../utils/reminderUnit';
+import { RECURRENCE_OPTIONS } from '../utils/recurrence';
 import { NotificationGate } from '../components/NotificationGate';
 
 // Componente para Formulario de Tarea (adaptado para el empleado)
 const TaskFormModal = ({ isOpen, onClose, initialTask, employees, onSave, user }) => {
   const [formData, setFormData] = useState({
     title: '', priority: 'P3', assigned_to: '', description: '',
-    due_date: '', recurrence_time: '', recurrence_interval: '', recurrence_days: [], reminder_hours: '', reminder_unit: 'minutes', motivation: ''
+    due_date: '', recurrence_time: '', recurrence_days: '', reminder_hours: '', reminder_unit: 'minutes', motivation: ''
   });
-  const [recurrenceEdited, setRecurrenceEdited] = useState(false);
-  const [isRecurrenceActive, setIsRecurrenceActive] = useState(false);
 
   useEffect(() => {
     if (isOpen) {
       if (initialTask) {
-        const initialDays = initialTask.recurrence_days ? initialTask.recurrence_days.split(',') : [];
         setFormData({
-          title: initialTask.title || '', priority: initialTask.priority || 'P3', 
+          title: initialTask.title || '', priority: initialTask.priority || 'P3',
           assigned_to: initialTask.assigned_to || '', description: initialTask.description || '',
           due_date: initialTask.due_date || '', recurrence_time: initialTask.recurrence_time || '',
-          recurrence_interval: initialTask.recurrence_interval || '',
-          recurrence_days: initialDays,
+          recurrence_days: initialTask.recurrence_days || '',
           ...(() => { const r = fromReminderSeconds(initialTask.reminder_hours); return { reminder_hours: r.value, reminder_unit: r.unit }; })(),
           motivation: initialTask.motivation || ''
         });
-        setRecurrenceEdited(true);
-        setIsRecurrenceActive(initialDays.length > 0);
       } else {
         setFormData({
           title: '', priority: 'P3', assigned_to: '', description: '',
-          due_date: '', recurrence_time: '', recurrence_interval: '', recurrence_days: [], reminder_hours: '', reminder_unit: 'minutes', motivation: ''
+          due_date: '', recurrence_time: '', recurrence_days: '', reminder_hours: '', reminder_unit: 'minutes', motivation: ''
         });
-        setRecurrenceEdited(false);
-        setIsRecurrenceActive(false);
       }
     }
   }, [isOpen, initialTask]);
@@ -99,14 +92,7 @@ const TaskFormModal = ({ isOpen, onClose, initialTask, employees, onSave, user }
           <div className="flex flex-col gap-2">
             <label className="text-sm font-semibold text-slate-700 dark:text-slate-300">Fecha Límite</label>
             <CalendarPicker selectedDate={formData.due_date} onSelectDate={(dateStr) => {
-              setFormData(prev => {
-                const next = { ...prev, due_date: dateStr };
-                if (isRecurrenceActive && !recurrenceEdited && dateStr) {
-                  const d = new Date(dateStr + 'T12:00:00');
-                  next.recurrence_days = [String(d.getDay())];
-                }
-                return next;
-              });
+              setFormData(prev => ({ ...prev, due_date: dateStr }));
             }} />
           </div>
           <div className="flex flex-col gap-2">
@@ -115,65 +101,19 @@ const TaskFormModal = ({ isOpen, onClose, initialTask, employees, onSave, user }
           </div>
         </div>
         <div className="flex flex-col gap-2">
-          <div className="flex justify-between items-center mb-1">
-            <label className="text-sm font-semibold text-slate-700 dark:text-slate-300">Repetición</label>
-            <button
-              type="button"
-              onClick={() => {
-                const nextState = !isRecurrenceActive;
-                setIsRecurrenceActive(nextState);
-                if (nextState) {
-                  if (formData.due_date && formData.recurrence_days.length === 0) {
-                    const d = new Date(formData.due_date + 'T12:00:00');
-                    setFormData(prev => ({ ...prev, recurrence_days: [String(d.getDay())] }));
-                    setRecurrenceEdited(false);
-                  }
-                } else {
-                  setFormData(prev => ({ ...prev, recurrence_days: [] }));
-                }
-              }}
-              className={cn(
-                "text-xs font-semibold px-3 py-1.5 rounded-full transition-all border",
-                isRecurrenceActive
-                  ? "bg-red-50 text-red-600 border-red-200 hover:bg-red-100 dark:bg-red-900/20 dark:text-red-400 dark:border-red-900/50"
-                  : "bg-white text-slate-600 border-slate-200 hover:bg-slate-50 dark:bg-slate-800 dark:text-slate-300 dark:border-slate-700"
-              )}
-            >
-              {isRecurrenceActive ? "Desactivar" : "Activar repetición"}
-            </button>
-          </div>
-          {isRecurrenceActive && (
-            <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} className="flex justify-between gap-1 overflow-hidden">
-              {[
-                { val: '1', label: 'L' }, { val: '2', label: 'M' }, { val: '3', label: 'M' },
-                { val: '4', label: 'J' }, { val: '5', label: 'V' }, { val: '6', label: 'S' }, { val: '0', label: 'D' }
-              ].map(d => {
-                const isSel = formData.recurrence_days.includes(d.val);
-                return (
-                  <button
-                    key={d.val}
-                    type="button"
-                    onClick={() => {
-                      setRecurrenceEdited(true);
-                      setFormData(prev => {
-                        const days = new Set(prev.recurrence_days);
-                        if (days.has(d.val)) days.delete(d.val);
-                        else days.add(d.val);
-                        return { ...prev, recurrence_days: Array.from(days) };
-                      });
-                    }}
-                    className={cn(
-                      "w-10 h-10 rounded-full text-sm font-semibold transition-all flex items-center justify-center",
-                      isSel 
-                        ? "bg-emerald-500 text-white shadow-md dark:bg-emerald-600"
-                        : "bg-slate-100 text-slate-500 hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-400 dark:hover:bg-slate-700"
-                    )}
-                  >
-                    {d.label}
-                  </button>
-                )
-              })}
-            </motion.div>
+          <label className="text-sm font-semibold text-slate-700 dark:text-slate-300">Repetición</label>
+          <Select
+            value={formData.recurrence_days}
+            onChange={e => setFormData(prev => ({ ...prev, recurrence_days: e.target.value }))}
+          >
+            {RECURRENCE_OPTIONS.map(o => (
+              <option key={o.value || 'none'} value={o.value}>{o.label}</option>
+            ))}
+          </Select>
+          {formData.recurrence_days && (
+            <span className="text-xs text-slate-400 dark:text-slate-500">
+              Al completarla se crea sola la próxima, según esta repetición.
+            </span>
           )}
         </div>
 
@@ -448,8 +388,8 @@ export default function EmpleadoDashboard() {
         description: formData.description,
         due_date: formData.due_date || null,
         recurrence_time: formData.recurrence_time || null,
-        recurrence_interval: formData.recurrence_interval ? Number(formData.recurrence_interval) : null,
-        recurrence_days: formData.recurrence_days.length > 0 ? formData.recurrence_days.join(',') : null,
+        recurrence_interval: null,
+        recurrence_days: formData.recurrence_days || null, // patrón de repetición (keyword)
         reminder_hours: toReminderSeconds(formData.reminder_hours, formData.reminder_unit), // guardado en segundos
         motivation: formData.motivation || null,
       };

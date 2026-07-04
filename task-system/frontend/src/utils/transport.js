@@ -2,6 +2,7 @@
 // directas contra Supabase (anon key + RLS). Reemplaza al backend Express.
 // La capa offline (api.js) NO cambia: solo cambia "el transporte".
 import { supabase } from './supabaseClient';
+import { isRecurring, nextOccurrence } from './recurrence';
 
 // Embebido de relaciones (mismos nombres de FK que usaba el backend).
 const TASK_SELECT =
@@ -110,6 +111,36 @@ async function createTask(body, self) {
   return data;
 }
 
+// ── Recurrencia: al completar una tarea repetitiva, crea la próxima ──────────
+// El patrón vive en recurrence_days ('daily'|'weekly'|'monthly'|'last_business_day').
+// La próxima fecha se calcula en recurrence.js. Reemplaza al viejo trigger de
+// Postgres (que hay que desactivar; ver supabase/migrations/0005_*.sql).
+async function maybeCreateRecurrence(task) {
+  const pattern = task?.recurrence_days;
+  if (!isRecurring(pattern)) return;
+  const nextDate = nextOccurrence(pattern, task.due_date);
+  if (!nextDate) return;
+
+  const insert = {
+    title: task.title,
+    description: task.description || '',
+    motivation: task.motivation || '',
+    priority: task.priority || 'P3',
+    due_date: nextDate,
+    recurrence_interval: null,
+    recurrence_days: pattern,
+    recurrence_time: task.recurrence_time || null,
+    reminder_hours: task.reminder_hours ?? null,
+    assigned_to: task.assigned_to || null,
+    created_by: task.created_by ?? me().id,
+    uuid: (globalThis.crypto?.randomUUID?.() || null),
+    primary_recurrence_day: null,
+  };
+
+  const { error } = await supabase.from('tasks').insert(insert);
+  if (error) console.warn('[recurrence] no se pudo crear la próxima tarea', error);
+}
+
 // ── Enviar mensaje (POST /chat/messages) ────────────────────────────────────
 async function sendMessage(body) {
   const u = me();
@@ -207,7 +238,9 @@ export async function request(path, method = 'GET', body = null) {
         }
         const { data, error } = await supabase.from('tasks').update(patch).eq(col, val).select(TASK_SELECT).single();
         if (error) throw error;
-        return data; // el trigger de Postgres genera la próxima tarea recurrente al completar
+        // Al completar una tarea repetitiva, generamos la próxima ocurrencia.
+        if (action === 'complete') await maybeCreateRecurrence(data);
+        return data;
       }
     }
 

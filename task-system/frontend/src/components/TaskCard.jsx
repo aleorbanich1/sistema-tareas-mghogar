@@ -1,6 +1,7 @@
 import React, { memo } from 'react';
 import { cn } from '../utils/cn';
-import { CheckCircle2, Clock, Info, XCircle, Lightbulb, RotateCcw } from 'lucide-react';
+import { CheckCircle2, Clock, Info, XCircle, Lightbulb, RotateCcw, Repeat } from 'lucide-react';
+import { recurrenceLabel } from '../utils/recurrence';
 
 const PRIORITY_LABELS = { P1: 'P1 Urgente', P2: 'P2 Alta', P3: 'P3 Normal', P4: 'P4 Baja' };
 const STATUS_LABELS = { pending: 'Pendiente', done: 'Hecha', failed: 'No completada', info_needed: 'Falta info' };
@@ -70,6 +71,12 @@ export const TaskCard = memo(function TaskCard({ task, onComplete, onAction, onR
                 {formatDue(task.due_date, task.recurrence_time)}
               </span>
             )}
+            {recurrenceLabel(task.recurrence_days) && (
+              <span className="inline-flex items-center gap-1 text-xs font-medium text-indigo-700 dark:text-indigo-400 bg-indigo-50 dark:bg-indigo-900/25 px-2 py-0.5 rounded-full">
+                <Repeat size={12} />
+                {recurrenceLabel(task.recurrence_days)}
+              </span>
+            )}
           </div>
           
           <h3 className={cn(
@@ -136,5 +143,6 @@ export const TaskCard = memo(function TaskCard({ task, onComplete, onAction, onR
          prev.task.priority === next.task.priority &&
          prev.task.due_date === next.task.due_date &&
          prev.task.recurrence_time === next.task.recurrence_time &&
+         prev.task.recurrence_days === next.task.recurrence_days &&
          prev.task.motivation === next.task.motivation;
 });

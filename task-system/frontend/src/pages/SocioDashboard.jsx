@@ -13,6 +13,11 @@ import { cn } from '../utils/cn';
 import { useAuthActions } from '../utils/auth';
 import { supabase } from '../utils/supabaseClient';
 import ChatPanel from '../components/ChatPanel';
+import { ensureNotificationPermission, armAudioUnlock, playPop } from '../utils/notifications';
+import { useTaskReminders } from '../utils/useTaskNotifications';
+import { initReminders, syncReminders } from '../utils/reminders';
+import { REMINDER_UNITS, toReminderSeconds, fromReminderSeconds } from '../utils/reminderUnit';
+import { NotificationGate } from '../components/NotificationGate';
 
 // Iniciales para el avatar del registro (ej. "Olivia Sterling" → "OS").
 function initials(name = '') {
@@ -37,7 +42,7 @@ function timeAgo(iso) {
 const TaskFormModal = memo(({ isOpen, onClose, initialTask, employees, onSave, user }) => {
   const [formData, setFormData] = useState({
     title: '', priority: 'P3', assigned_to: '', description: '',
-    due_date: '', recurrence_time: '', recurrence_interval: '', recurrence_days: [], reminder_hours: '', motivation: ''
+    due_date: '', recurrence_time: '', recurrence_interval: '', recurrence_days: [], reminder_hours: '', reminder_unit: 'minutes', motivation: ''
   });
   const [recurrenceEdited, setRecurrenceEdited] = useState(false);
   const [isRecurrenceActive, setIsRecurrenceActive] = useState(false);
@@ -52,15 +57,15 @@ const TaskFormModal = memo(({ isOpen, onClose, initialTask, employees, onSave, u
           due_date: initialTask.due_date || '', recurrence_time: initialTask.recurrence_time || '', 
           recurrence_interval: initialTask.recurrence_interval || '',
           recurrence_days: initialDays,
-          reminder_hours: initialTask.reminder_hours || '',
+          ...(() => { const r = fromReminderSeconds(initialTask.reminder_hours); return { reminder_hours: r.value, reminder_unit: r.unit }; })(),
           motivation: initialTask.motivation || ''
         });
         setRecurrenceEdited(true);
         setIsRecurrenceActive(initialDays.length > 0);
       } else {
-        setFormData({ 
+        setFormData({
           title: '', priority: 'P3', assigned_to: '', description: '',
-          due_date: '', recurrence_time: '', recurrence_interval: '', recurrence_days: [], reminder_hours: '', motivation: ''
+          due_date: '', recurrence_time: '', recurrence_interval: '', recurrence_days: [], reminder_hours: '', reminder_unit: 'minutes', motivation: ''
         });
         setRecurrenceEdited(false);
         setIsRecurrenceActive(false);
@@ -205,7 +210,7 @@ const TaskFormModal = memo(({ isOpen, onClose, initialTask, employees, onSave, u
         <div className="flex flex-col gap-2">
           <label className="text-sm font-semibold text-slate-700 dark:text-slate-300 flex items-center gap-2">
             <Bell size={16} /> Recordatorio
-            <span className="text-xs font-normal text-slate-400">¿Cuántos minutos antes avisar?</span>
+            <span className="text-xs font-normal text-slate-400">¿Cada cuánto repetir el aviso?</span>
           </label>
           <div className="flex items-center gap-3">
             <button
@@ -236,10 +241,19 @@ const TaskFormModal = memo(({ isOpen, onClose, initialTask, employees, onSave, u
               }}
               className="w-10 h-10 rounded-xl bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 text-lg font-bold flex items-center justify-center hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors select-none"
             >+</button>
-            <span className="text-sm text-slate-500 dark:text-slate-400 font-medium">
-              {Number(formData.reminder_hours) === 1 ? 'minuto' : 'minutos'}
-            </span>
+            <select
+              value={formData.reminder_unit}
+              onChange={e => setFormData(prev => ({ ...prev, reminder_unit: e.target.value }))}
+              className="h-10 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-3 text-sm font-medium text-slate-700 dark:text-slate-200 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500 transition-colors"
+            >
+              {REMINDER_UNITS.map(u => (
+                <option key={u.value} value={u.value}>{u.label}</option>
+              ))}
+            </select>
           </div>
+          <span className="text-xs text-slate-400 dark:text-slate-500">
+            Suena cada ese tiempo mientras la tarea esté pendiente. Dejá en 0 para no avisar.
+          </span>
         </div>
         <Button onClick={saveTask} disabled={submitting} className="w-full mt-4">{submitting ? 'Guardando…' : 'Guardar Tarea'}</Button>
       </div>
@@ -274,6 +288,32 @@ export default function SocioDashboard() {
   const [deleteModalOpen, setDeleteModalOpen] = useState(false);
   const [currentTaskToEdit, setCurrentTaskToEdit] = useState(null);
   const [currentTaskIdToDelete, setCurrentTaskIdToDelete] = useState(null);
+
+  // Notificaciones: permiso, sonido y entrega en segundo plano (push/nativo).
+  useEffect(() => {
+    ensureNotificationPermission();
+    armAudioUnlock();
+    initReminders(user.id);
+  }, [user.id]);
+
+  // Recordatorios en primer plano (solo web) para tareas asignadas al socio/jefe.
+  useTaskReminders(tasks, user.id);
+
+  // Reagenda notificaciones nativas (APK) al cambiar las tareas.
+  useEffect(() => {
+    syncReminders(tasks, user.id);
+  }, [tasks, user.id]);
+
+  // Banner visible dentro de la app cuando salta un recordatorio.
+  const [reminderBanner, setReminderBanner] = useState(null);
+  useEffect(() => {
+    const onReminder = (e) => {
+      setReminderBanner(e.detail);
+      setTimeout(() => setReminderBanner(null), 8000);
+    };
+    window.addEventListener('MG_REMINDER', onReminder);
+    return () => window.removeEventListener('MG_REMINDER', onReminder);
+  }, []);
 
   useEffect(() => {
     loadEmployees();
@@ -396,8 +436,20 @@ export default function SocioDashboard() {
   };
 
   const handleComplete = async (id) => {
+    playPop(); // sonido de tarea completada (inmediato, antes de la red)
     try {
       const saved = await api(`/tasks/${id}/complete`, { method: 'PATCH' });
+      upsertTaskInState(saved);
+      loadTasks({ silent: true });
+    } catch (err) {
+      alert(err.message);
+    }
+  };
+
+  // Reactivar una tarea completada/fallida: vuelve a "pendiente".
+  const handleReopen = async (id) => {
+    try {
+      const saved = await api(`/tasks/${id}`, { method: 'PATCH', body: { status: 'pending', fail_reason: null } });
       upsertTaskInState(saved);
       loadTasks({ silent: true });
     } catch (err) {
@@ -421,7 +473,7 @@ export default function SocioDashboard() {
         recurrence_time: formData.recurrence_time || null,
         recurrence_interval: formData.recurrence_interval ? Number(formData.recurrence_interval) : null,
         recurrence_days: formData.recurrence_days.length > 0 ? formData.recurrence_days.join(',') : null,
-        reminder_hours: formData.reminder_hours ? Number(formData.reminder_hours) : null,
+        reminder_hours: toReminderSeconds(formData.reminder_hours, formData.reminder_unit), // guardado en segundos
         motivation: formData.motivation || null,
       };
 
@@ -483,6 +535,25 @@ export default function SocioDashboard() {
           </button>
         </div>
       </header>
+
+      {/* Aviso de permisos de notificación (al iniciar sesión) */}
+      <NotificationGate userId={user.id} />
+
+      {/* Banner de recordatorio dentro de la app */}
+      {reminderBanner && (
+        <motion.div
+          initial={{ opacity: 0, y: -10 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="flex items-start gap-3 p-4 mb-4 rounded-xl bg-emerald-50 text-emerald-800 dark:bg-emerald-900/25 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-900/50"
+        >
+          <Bell size={20} className="shrink-0 mt-0.5" />
+          <div className="flex-1">
+            <p className="text-sm font-semibold">{reminderBanner.title}</p>
+            <p className="text-sm">{reminderBanner.body}</p>
+          </div>
+          <button onClick={() => setReminderBanner(null)} className="text-emerald-600 dark:text-emerald-400 shrink-0">✕</button>
+        </motion.div>
+      )}
 
       {/* Stats Quick View (Simplified) */}
       <div className="grid grid-cols-2 gap-3 mb-6">
@@ -557,10 +628,11 @@ export default function SocioDashboard() {
               .filter(t => (activeTab === 'historial' && statusFilter) ? t.status === statusFilter : true)
               .map(task => (
               <motion.div key={task.id} initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
-                <TaskCard 
-                  task={task} 
+                <TaskCard
+                  task={task}
                   isSocio={true}
                   onComplete={Number(task.assigned_to) === Number(user.id) ? handleComplete : undefined}
+                  onReopen={handleReopen}
                   onAction={(t) => (
                     <>
                       <Button 

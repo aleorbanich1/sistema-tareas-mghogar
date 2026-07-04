@@ -2,6 +2,7 @@
   "name": "frontend",
   "version": "1.0.0",
   "type": "module",
+  "packageManager": "yarn@1.22.22",
   "scripts": {
     "dev": "vite",
     "build": "vite build",
@@ -20,6 +21,7 @@
   "dependencies": {
     "@capacitor/android": "^8.4.0",
     "@capacitor/core": "^8.4.0",
+    "@capacitor/local-notifications": "^8.0.0",
     "@supabase/supabase-js": "^2.108.2",
     "clsx": "^2.1.1",
     "date-fns": "^4.4.0",

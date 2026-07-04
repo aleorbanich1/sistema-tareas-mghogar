@@ -1,6 +1,37 @@
+# ── Dependencias ────────────────────────────────────────────────
 node_modules/
-backend/.env/
+
+# ── Variables de entorno (nunca subir) ──────────────────────────
+.env
+.env.local
 task-system/backend/.env
+task-system/frontend/.env
+
+# ── Artefactos de build web (se regeneran con `yarn build`) ─────
+task-system/frontend/dist/
+
+# ── Android / Capacitor (se regeneran) ─────────────────────────
+*.apk
+task-system/frontend/MG-Hogar.apk
+task-system/frontend/android/.gradle/
+task-system/frontend/android/build/
+task-system/frontend/android/app/build/
+task-system/frontend/android/app/src/main/assets/public/
+task-system/frontend/android/app/src/main/assets/capacitor.config.json
+task-system/frontend/android/capacitor.settings.gradle
+task-system/frontend/android/app/capacitor.build.gradle
+
+# ── Backend legado (SQLite + logs) ─────────────────────────────
+task-system/backend/*.db
+task-system/backend/*.db-shm
+task-system/backend/*.db-wal
+task-system/backend/*.log
+
+# ── Sistema operativo / editor ─────────────────────────────────
+.DS_Store
+Thumbs.db
+
+# ── Documentos internos (no versionar) ─────────────────────────
 Documentos/Dashboard de sistema de tareas para MG Hogar 37b698929f4980ae91e1cd8b8578bd68.md
 Documentos/Skills/backend-developer.md
 Documentos/Skills/caveman_skill.md
@@ -17,11 +48,6 @@ NO-TOCAR/MARCO-COMUNICACION.md
 NO-TOCAR/MARCO-IDENTIDAD.md
 NO-TOCAR/SISTEMA-ESTRATEGIA-DE-CONTENIDO-PRIMEROS6MESES.md
 NO-TOCAR/ÁNGULOS-CONTENIDO.md
-task-system/frontend/.env
-task-system/frontend/.env
-task-system/frontend/.env
-task-system/frontend/.env
 NO-TOCAR/SISTEMA-DE-GUIONADO.md
-task-system/frontend/.env
 task-system/MIGRACION-SUPABASE.sql
 task-system/PASOS-FINALES-SUPABASE.md

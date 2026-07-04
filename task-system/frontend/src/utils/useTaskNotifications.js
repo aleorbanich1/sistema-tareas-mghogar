@@ -1,62 +1,57 @@
 import { useEffect, useRef } from 'react';
-import {
-  notify,
-  taskReminderTargetMs,
-  isReminderFired,
-  markReminderFired,
-} from './notifications';
+import { notify, taskReminderIntervalMs } from './notifications';
+import { isNative } from './nativeNotifications';
 
-// setTimeout desborda con delays > ~24.8 días. Recordatorios más lejanos se
-// agendan recién cuando la fecha se acerca (en la próxima carga de tareas).
-const MAX_DELAY = 2 ** 31 - 1;
+// Cada cuánto revisa (en memoria) si alguna tarea tiene que volver a avisar.
+const CHECK_INTERVAL_MS = 1000; // 1 segundo
 
-// Agenda un recordatorio local por cada tarea pendiente asignada al usuario que
-// tenga recordatorio configurado. Reprograma cuando cambia la lista de tareas.
+// Recordatorio REPETITIVO: mientras una tarea siga pendiente y asignada al
+// usuario, vuelve a avisar cada `reminder_hours` segundos (el intervalo elegido
+// al crear la tarea). NO consulta la base de datos: solo recorre el array
+// `tasks` ya cargado en memoria, así que es liviano sin importar cuántas tareas
+// o usuarios haya. La hora de la tarea NO influye acá (solo sirve para ordenar).
 export function useTaskReminders(tasks, userId) {
-  const timersRef = useRef(new Map()); // key -> timeoutId
+  const tasksRef = useRef(tasks);
+  tasksRef.current = tasks;
+  const userIdRef = useRef(userId);
+  userIdRef.current = userId;
+  const lastFiredRef = useRef(new Map()); // taskId -> ms del último aviso
 
   useEffect(() => {
-    const timers = timersRef.current;
-    const now = Date.now();
-    const wanted = new Map();
+    // En el APK los recordatorios los agenda el SO (notificaciones nativas):
+    // no usamos el timer en primer plano para no duplicar el aviso.
+    if (isNative()) return;
 
-    for (const t of tasks || []) {
-      if (!t || t.status !== 'pending') continue;
-      if (Number(t.assigned_to) !== Number(userId)) continue;
-      const remindAt = taskReminderTargetMs(t);
-      if (remindAt == null) continue;
-      const key = `${t.id}:${remindAt}`;
-      if (isReminderFired(key)) continue;
-      if (remindAt <= now) continue;              // ya pasó: no spamear
-      if (remindAt - now > MAX_DELAY) continue;   // muy lejano: agendar más adelante
-      wanted.set(key, { task: t, remindAt });
-    }
+    const tick = () => {
+      const now = Date.now();
+      const uid = userIdRef.current;
+      const last = lastFiredRef.current;
+      const seen = new Set();
 
-    // Cancelar timers que ya no corresponden.
-    for (const [key, id] of timers) {
-      if (!wanted.has(key)) { clearTimeout(id); timers.delete(key); }
-    }
+      for (const t of tasksRef.current || []) {
+        if (!t || t.status !== 'pending') continue;
+        if (Number(t.assigned_to) !== Number(uid)) continue;
+        const intervalMs = taskReminderIntervalMs(t);
+        if (intervalMs == null) continue;
+        seen.add(t.id);
 
-    // Agendar los nuevos.
-    for (const [key, { task, remindAt }] of wanted) {
-      if (timers.has(key)) continue;
-      const delay = Math.max(0, remindAt - Date.now());
-      const id = setTimeout(() => {
-        markReminderFired(key);
-        timers.delete(key);
-        const time = task.recurrence_time ? ` — ${task.recurrence_time}` : '';
-        notify('⏰ Recordatorio de tarea', `${task.title}${time}`, { tag: `reminder-${task.id}` });
-      }, delay);
-      timers.set(key, id);
-    }
-  }, [tasks, userId]);
+        const prev = last.get(t.id);
+        if (prev == null) {
+          // Primera vez que la vemos: arranca el conteo (no avisa al instante).
+          last.set(t.id, now);
+          continue;
+        }
+        if (now - prev >= intervalMs) {
+          last.set(t.id, now);
+          notify('⏰ Recordatorio de tarea', `Tenés que hacer: ${t.title}`, { tag: `reminder-${t.id}` });
+        }
+      }
 
-  // Limpiar todo al desmontar.
-  useEffect(() => {
-    const timers = timersRef.current;
-    return () => {
-      for (const id of timers.values()) clearTimeout(id);
-      timers.clear();
+      // Olvidar tareas que ya no están pendientes/visibles.
+      for (const id of last.keys()) if (!seen.has(id)) last.delete(id);
     };
+
+    const iv = setInterval(tick, CHECK_INTERVAL_MS);
+    return () => clearInterval(iv);
   }, []);
 }

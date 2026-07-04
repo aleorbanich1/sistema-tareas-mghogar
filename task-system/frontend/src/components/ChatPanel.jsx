@@ -5,6 +5,7 @@ import { Button } from './ui/Button';
 import { MessageCircle, Send, ArrowLeft, Loader2, X, ChevronDown, Paperclip, CheckCircle2 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { cn } from '../utils/cn';
+import { notify } from '../utils/notifications';
 
 // ── Floating chat bubble + panel ────────────────────────────────────────────
 // Both Socio and Empleado dashboards mount this component. It handles:
@@ -88,6 +89,7 @@ export default function ChatPanel() {
   const me = JSON.parse(localStorage.getItem('mg_user') || '{}');
   const [open, setOpen] = useState(false);
   const [unread, setUnread] = useState(0);
+  const [unreadBy, setUnreadBy] = useState({}); // { [fromUserId]: count }
   const [users, setUsers] = useState([]);
   const [activeChat, setActiveChat] = useState(null); // user object
   const [messages, setMessages] = useState([]);
@@ -117,20 +119,28 @@ export default function ChatPanel() {
     } catch {}
   }, []);
 
-  const fetchUnread = useCallback(async () => {
+  // Fuente de verdad de no leídos, agrupados por remitente. Setea el detalle por
+  // conversación Y el total. Se usa al entrar (incluso tras estar cerrada la app).
+  const fetchUnreadBy = useCallback(async () => {
     try {
-      const data = await api('/chat/unread');
-      if (data && typeof data.unread === 'number') setUnread(data.unread);
+      const data = await api('/chat/unread-by-sender');
+      if (data && typeof data === 'object') {
+        const map = {};
+        let total = 0;
+        for (const [k, v] of Object.entries(data)) { map[k] = Number(v) || 0; total += map[k]; }
+        setUnreadBy(map);
+        setUnread(total);
+      }
     } catch {}
   }, []);
 
   useEffect(() => {
     fetchUsers();
-    fetchUnread();
+    fetchUnreadBy();
     fetchActiveTasks();
-    const iv = setInterval(fetchUnread, 30_000);
+    const iv = setInterval(fetchUnreadBy, 30_000);
     return () => clearInterval(iv);
-  }, [fetchUsers, fetchUnread, fetchActiveTasks]);
+  }, [fetchUsers, fetchUnreadBy, fetchActiveTasks]);
 
   // ── Listen to OPEN_CHAT global event ────────────────────────────────────
   useEffect(() => {
@@ -145,6 +155,7 @@ export default function ChatPanel() {
             if (userToOpen) {
               setActiveChat(userToOpen);
               setMessages([]);
+              setUnreadBy(prev => { const n = { ...prev }; delete n[userToOpen.id]; return n; });
             }
             return prevUsers;
           });
@@ -173,9 +184,14 @@ export default function ChatPanel() {
         });
       }
       // Update unread in any case
-      if (msg.to_user === me.id) {
-        if (!activeChat || msg.from_user !== activeChat.id || !open) {
+      if (Number(msg.to_user) === Number(me.id)) {
+        const viewingThisChat = open && activeChat && Number(msg.from_user) === Number(activeChat.id);
+        if (!viewingThisChat) {
           setUnread(u => u + 1);
+          setUnreadBy(prev => ({ ...prev, [msg.from_user]: (prev[msg.from_user] || 0) + 1 }));
+          // Notificación específica: de quién es el mensaje nuevo (con sonido + banner).
+          const from = msg.from_full_name || msg.from_username || 'Alguien';
+          notify(`💬 ${from}`, msg.content || 'Te envió un mensaje', { tag: `msg-${msg.from_user}` });
         }
       }
     };
@@ -192,11 +208,14 @@ export default function ChatPanel() {
       try {
         const data = await api(`/chat/messages?with=${activeChat.id}`);
         if (!cancelled && Array.isArray(data)) setMessages(data);
+        // El GET marca como leídos en el servidor; reconciliamos el badge con
+        // la verdad del servidor (arregla contadores fantasma que no bajaban).
+        if (!cancelled) fetchUnreadBy();
       } catch {}
       if (!cancelled) setLoadingMsgs(false);
     })();
     return () => { cancelled = true; };
-  }, [activeChat]);
+  }, [activeChat, fetchUnreadBy]);
 
   // ── Auto-scroll to bottom ──────────────────────────────────────────────
   useEffect(() => {
@@ -253,18 +272,30 @@ export default function ChatPanel() {
 
   // ── Unread reset when viewing a chat ───────────────────────────────────
   useEffect(() => {
-    if (open && activeChat) fetchUnread();
-  }, [open, activeChat, fetchUnread]);
+    if (open && activeChat) fetchUnreadBy();
+  }, [open, activeChat, fetchUnreadBy]);
+
+  const clearUnreadFor = (userId) => {
+    setUnreadBy(prev => {
+      const cnt = prev[userId] || 0;
+      if (!cnt) return prev;
+      setUnread(u => Math.max(0, u - cnt));
+      const next = { ...prev };
+      delete next[userId];
+      return next;
+    });
+  };
 
   const openChat = (user) => {
     setActiveChat(user);
     setMessages([]);
+    clearUnreadFor(user.id);
   };
 
   const backToList = () => {
     setActiveChat(null);
     setMessages([]);
-    fetchUnread();
+    fetchUnreadBy();
   };
 
   // ── Group messages by day ──────────────────────────────────────────────
@@ -336,6 +367,11 @@ export default function ChatPanel() {
               </div>
             </div>
 
+            {/* Aviso: los mensajes son temporales */}
+            <div className="shrink-0 px-4 py-1.5 bg-amber-50 dark:bg-amber-900/15 border-b border-amber-100 dark:border-amber-900/30 text-[11px] font-medium text-amber-700 dark:text-amber-400 text-center">
+              ⏳ Los mensajes son temporales: se borran a los 7 días.
+            </div>
+
             {/* ── Body: Contact list or Chat thread ────────────────────── */}
             {!activeChat ? (
               /* ── Contact List ──────────────────────────────────────── */
@@ -349,25 +385,45 @@ export default function ChatPanel() {
                   <div className="py-2">
                     {users
                       .filter(u => u.id !== me.id)
-                      .map(u => (
+                      // Los que tienen mensajes sin leer, primero.
+                      .sort((a, b) => (unreadBy[b.id] || 0) - (unreadBy[a.id] || 0))
+                      .map(u => {
+                        const uUnread = unreadBy[u.id] || 0;
+                        return (
                         <button
                           key={u.id}
                           onClick={() => openChat(u)}
                           className="w-full flex items-center gap-3 px-4 py-3 hover:bg-slate-50 dark:hover:bg-slate-800/60 transition-colors text-left"
                         >
                           {/* Avatar */}
-                          <div className="w-10 h-10 rounded-full bg-gradient-to-br from-emerald-400 to-teal-600 flex items-center justify-center text-white font-bold text-sm shrink-0">
-                            {(u.full_name || u.username || '?').charAt(0).toUpperCase()}
+                          <div className="relative shrink-0">
+                            <div className="w-10 h-10 rounded-full bg-gradient-to-br from-emerald-400 to-teal-600 flex items-center justify-center text-white font-bold text-sm">
+                              {(u.full_name || u.username || '?').charAt(0).toUpperCase()}
+                            </div>
+                            {uUnread > 0 && (
+                              <span className="absolute -top-1 -right-1 min-w-[18px] h-[18px] px-1 bg-red-500 text-white text-[10px] font-bold rounded-full flex items-center justify-center ring-2 ring-white dark:ring-slate-900">
+                                {uUnread > 9 ? '9+' : uUnread}
+                              </span>
+                            )}
                           </div>
                           <div className="flex-1 min-w-0">
-                            <p className="text-sm font-medium text-slate-900 dark:text-slate-100 truncate">
+                            <p className={cn(
+                              "text-sm truncate",
+                              uUnread > 0 ? "font-bold text-slate-900 dark:text-white" : "font-medium text-slate-900 dark:text-slate-100"
+                            )}>
                               {u.full_name || u.username}
                             </p>
-                            <p className="text-[11px] text-slate-400 dark:text-slate-500 capitalize">{u.role}</p>
+                            <p className={cn(
+                              "text-[11px] capitalize",
+                              uUnread > 0 ? "text-emerald-600 dark:text-emerald-400 font-medium" : "text-slate-400 dark:text-slate-500"
+                            )}>
+                              {uUnread > 0 ? `${uUnread} mensaje${uUnread > 1 ? 's' : ''} nuevo${uUnread > 1 ? 's' : ''}` : u.role}
+                            </p>
                           </div>
                           <ChevronDown size={14} className="text-slate-300 dark:text-slate-600 -rotate-90" />
                         </button>
-                      ))}
+                        );
+                      })}
                   </div>
                 )}
               </div>

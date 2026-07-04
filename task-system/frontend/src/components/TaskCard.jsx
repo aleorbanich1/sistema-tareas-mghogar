@@ -1,13 +1,30 @@
 import React, { memo } from 'react';
 import { cn } from '../utils/cn';
-import { CheckCircle2, Clock, Info, XCircle, Lightbulb } from 'lucide-react';
+import { CheckCircle2, Clock, Info, XCircle, Lightbulb, RotateCcw } from 'lucide-react';
 
 const PRIORITY_LABELS = { P1: 'P1 Urgente', P2: 'P2 Alta', P3: 'P3 Normal', P4: 'P4 Baja' };
 const STATUS_LABELS = { pending: 'Pendiente', done: 'Hecha', failed: 'No completada', info_needed: 'Falta info' };
 
-export const TaskCard = memo(function TaskCard({ task, onComplete, onAction, isSocio }) {
+// Día + horario de realización, ej: "lun 07/07 · 14:30". Devuelve '' si no hay nada.
+// Ojo: due_date puede venir 'YYYY-MM-DD' o timestamp; parseamos al mediodía local
+// para evitar el desfase de zona horaria que corría la fecha un día para atrás.
+function formatDue(due, time) {
+  const parts = [];
+  if (due) {
+    const d = new Date(`${String(due).slice(0, 10)}T12:00:00`);
+    if (!isNaN(d.getTime())) {
+      parts.push(d.toLocaleDateString('es-AR', { weekday: 'short', day: '2-digit', month: '2-digit' }));
+    }
+  }
+  if (time) parts.push(time);
+  return parts.join(' · ');
+}
+
+export const TaskCard = memo(function TaskCard({ task, onComplete, onAction, onReopen, isSocio }) {
   const isDone = task.status === 'done';
-  const pClass = task.priority.toLowerCase();
+  const isClosed = task.status === 'done' || task.status === 'failed';
+  // Defensivo: si un payload en tiempo real llega sin priority, no tumbar la app.
+  const pClass = (task.priority || '').toLowerCase();
 
   return (
     <div className={cn(
@@ -47,6 +64,12 @@ export const TaskCard = memo(function TaskCard({ task, onComplete, onAction, isS
             <span className="text-xs font-medium text-slate-500 dark:text-slate-400 bg-slate-100 dark:bg-slate-800 px-2 py-0.5 rounded-full">
               {STATUS_LABELS[task.status]}
             </span>
+            {formatDue(task.due_date, task.recurrence_time) && (
+              <span className="inline-flex items-center gap-1 text-xs font-medium text-emerald-700 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-900/25 px-2 py-0.5 rounded-full tabular-nums">
+                <Clock size={12} />
+                {formatDue(task.due_date, task.recurrence_time)}
+              </span>
+            )}
           </div>
           
           <h3 className={cn(
@@ -58,12 +81,6 @@ export const TaskCard = memo(function TaskCard({ task, onComplete, onAction, isS
 
           {/* Meta */}
           <div className="flex flex-wrap gap-x-4 gap-y-2 text-xs text-slate-500 dark:text-slate-400 tabular-nums">
-            {task.due_date && (
-              <div className="flex items-center gap-1">
-                <Clock size={14} />
-                <span>{new Date(task.due_date).toLocaleDateString('es-AR')}</span>
-              </div>
-            )}
             {task.assignee && (
               <div className="flex items-center gap-1">
                 <span className="w-4 h-4 rounded-full bg-slate-200 dark:bg-slate-700 flex items-center justify-center text-[8px] font-bold">
@@ -97,9 +114,17 @@ export const TaskCard = memo(function TaskCard({ task, onComplete, onAction, isS
       </div>
 
       {/* Actions */}
-      {onAction && (
+      {(onAction || (isClosed && onReopen)) && (
         <div className="mt-4 pt-4 border-t border-slate-100 dark:border-slate-800 flex justify-end gap-2">
-          {onAction(task)}
+          {isClosed && onReopen && (
+            <button
+              onClick={() => onReopen(task.id)}
+              className="flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium rounded-lg text-slate-600 dark:text-slate-300 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 transition-colors"
+            >
+              <RotateCcw size={15} /> Reactivar
+            </button>
+          )}
+          {onAction && onAction(task)}
         </div>
       )}
     </div>
@@ -109,5 +134,7 @@ export const TaskCard = memo(function TaskCard({ task, onComplete, onAction, isS
          prev.task.status === next.task.status &&
          prev.task.title === next.task.title &&
          prev.task.priority === next.task.priority &&
+         prev.task.due_date === next.task.due_date &&
+         prev.task.recurrence_time === next.task.recurrence_time &&
          prev.task.motivation === next.task.motivation;
 });

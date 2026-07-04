@@ -2,6 +2,7 @@ import { lazy, Suspense, useEffect, useState } from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import { socket, flushSyncQueue } from './utils/api';
 import { AuthContext, getAuthFromStorage } from './utils/auth';
+import { ErrorBoundary } from './components/ErrorBoundary';
 
 const Login = lazy(() => import('./pages/Login'));
 const Register = lazy(() => import('./pages/Register'));
@@ -38,6 +39,7 @@ function App() {
       <Router>
         <div className="w-full min-h-[100dvh] flex flex-col bg-slate-50 dark:bg-slate-950 overflow-hidden">
           <div className="flex flex-col flex-1 px-5 py-8">
+            <ErrorBoundary>
             <Suspense fallback={<RouteSkeleton />}>
               <Routes>
                 {/* Redirects from old HTML routes */}
@@ -68,6 +70,7 @@ function App() {
                 <Route path="*" element={<Navigate to="/" replace />} />
               </Routes>
             </Suspense>
+            </ErrorBoundary>
           </div>
         </div>
       </Router>

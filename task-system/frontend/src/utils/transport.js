@@ -64,6 +64,13 @@ async function enrichMessage(row) {
   return m;
 }
 
+// Igual que enrichedTaskById pero para mensajes: trae el mensaje con los nombres
+// de remitente/receptor embebidos (los eventos realtime llegan sin los JOIN).
+async function enrichedMessageById(id) {
+  const { data } = await supabase.from('messages').select(MSG_SELECT).eq('id', id).maybeSingle();
+  return data ? await enrichMessage(data) : null;
+}
+
 // ── Crear tarea (POST /tasks y /tasks/self) ─────────────────────────────────
 async function createTask(body, self) {
   const u = me();
@@ -212,6 +219,21 @@ export async function request(path, method = 'GET', body = null) {
       if (error) throw error;
       return { unread: count || 0 };
     }
+    // No leídos agrupados por remitente → { [fromUserId]: count }. Fuente de
+    // verdad para el badge por conversación (funciona al entrar tras estar cerrada).
+    if (rawPath === '/chat/unread-by-sender' && method === 'GET') {
+      const uid = me().id;
+      const { data, error } = await supabase
+        .from('messages').select('from_user')
+        .eq('to_user', uid).eq('read', false);
+      if (error) throw error;
+      const counts = {};
+      for (const r of data || []) {
+        if (Number(r.from_user) === Number(uid)) continue; // ignora auto-mensajes
+        counts[r.from_user] = (counts[r.from_user] || 0) + 1;
+      }
+      return counts;
+    }
     if (rawPath === '/chat/messages' && method === 'GET') {
       const uid = me().id;
       const wid = params.get('with') ? Number(params.get('with')) : null;
@@ -270,7 +292,7 @@ export const socket = {
       .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'tasks' },
         ({ old: row }) => emit('TASK_DELETED', { id: row.id }))
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages' },
-        async ({ new: row }) => emit('MESSAGE_ADDED', await enrichMessage(row)))
+        async ({ new: row }) => emit('MESSAGE_ADDED', (await enrichedMessageById(row.id)) || await enrichMessage(row)))
       .subscribe();
   },
   disconnect() {

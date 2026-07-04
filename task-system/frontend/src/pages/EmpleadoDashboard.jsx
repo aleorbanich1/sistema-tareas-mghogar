@@ -12,14 +12,17 @@ import { cn } from '../utils/cn';
 import { CalendarPicker } from '../components/ui/CalendarPicker';
 import { useAuthActions } from '../utils/auth';
 import ChatPanel from '../components/ChatPanel';
-import { ensureNotificationPermission, armAudioUnlock, notify } from '../utils/notifications';
+import { ensureNotificationPermission, armAudioUnlock, notify, playPop } from '../utils/notifications';
 import { useTaskReminders } from '../utils/useTaskNotifications';
+import { initReminders, syncReminders } from '../utils/reminders';
+import { REMINDER_UNITS, toReminderSeconds, fromReminderSeconds } from '../utils/reminderUnit';
+import { NotificationGate } from '../components/NotificationGate';
 
 // Componente para Formulario de Tarea (adaptado para el empleado)
 const TaskFormModal = ({ isOpen, onClose, initialTask, employees, onSave, user }) => {
   const [formData, setFormData] = useState({
     title: '', priority: 'P3', assigned_to: '', description: '',
-    due_date: '', recurrence_time: '', recurrence_interval: '', recurrence_days: [], reminder_hours: '', motivation: ''
+    due_date: '', recurrence_time: '', recurrence_interval: '', recurrence_days: [], reminder_hours: '', reminder_unit: 'minutes', motivation: ''
   });
   const [recurrenceEdited, setRecurrenceEdited] = useState(false);
   const [isRecurrenceActive, setIsRecurrenceActive] = useState(false);
@@ -31,18 +34,18 @@ const TaskFormModal = ({ isOpen, onClose, initialTask, employees, onSave, user }
         setFormData({
           title: initialTask.title || '', priority: initialTask.priority || 'P3', 
           assigned_to: initialTask.assigned_to || '', description: initialTask.description || '',
-          due_date: initialTask.due_date || '', recurrence_time: initialTask.recurrence_time || '', 
+          due_date: initialTask.due_date || '', recurrence_time: initialTask.recurrence_time || '',
           recurrence_interval: initialTask.recurrence_interval || '',
           recurrence_days: initialDays,
-          reminder_hours: initialTask.reminder_hours || '',
+          ...(() => { const r = fromReminderSeconds(initialTask.reminder_hours); return { reminder_hours: r.value, reminder_unit: r.unit }; })(),
           motivation: initialTask.motivation || ''
         });
         setRecurrenceEdited(true);
         setIsRecurrenceActive(initialDays.length > 0);
       } else {
-        setFormData({ 
+        setFormData({
           title: '', priority: 'P3', assigned_to: '', description: '',
-          due_date: '', recurrence_time: '', recurrence_interval: '', recurrence_days: [], reminder_hours: '', motivation: ''
+          due_date: '', recurrence_time: '', recurrence_interval: '', recurrence_days: [], reminder_hours: '', reminder_unit: 'minutes', motivation: ''
         });
         setRecurrenceEdited(false);
         setIsRecurrenceActive(false);
@@ -178,7 +181,7 @@ const TaskFormModal = ({ isOpen, onClose, initialTask, employees, onSave, user }
         <div className="flex flex-col gap-2">
           <label className="text-sm font-semibold text-slate-700 dark:text-slate-300 flex items-center gap-2">
             <Bell size={16} /> Recordatorio
-            <span className="text-xs font-normal text-slate-400">¿Cuántos minutos antes avisar?</span>
+            <span className="text-xs font-normal text-slate-400">¿Cada cuánto repetir el aviso?</span>
           </label>
           <div className="flex items-center gap-3">
             <button
@@ -209,10 +212,19 @@ const TaskFormModal = ({ isOpen, onClose, initialTask, employees, onSave, user }
               }}
               className="w-10 h-10 rounded-xl bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 text-lg font-bold flex items-center justify-center hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors select-none"
             >+</button>
-            <span className="text-sm text-slate-500 dark:text-slate-400 font-medium">
-              {Number(formData.reminder_hours) === 1 ? 'minuto' : 'minutos'}
-            </span>
+            <select
+              value={formData.reminder_unit}
+              onChange={e => setFormData(prev => ({ ...prev, reminder_unit: e.target.value }))}
+              className="h-10 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-3 text-sm font-medium text-slate-700 dark:text-slate-200 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500 transition-colors"
+            >
+              {REMINDER_UNITS.map(u => (
+                <option key={u.value} value={u.value}>{u.label}</option>
+              ))}
+            </select>
           </div>
+          <span className="text-xs text-slate-400 dark:text-slate-500">
+            Suena cada ese tiempo mientras la tarea esté pendiente. Dejá en 0 para no avisar.
+          </span>
         </div>
 
         <Button onClick={saveTask} disabled={submitting} className="w-full mt-4">{submitting ? 'Guardando…' : 'Guardar Tarea'}</Button>
@@ -245,14 +257,34 @@ export default function EmpleadoDashboard() {
   const [currentTaskToEdit, setCurrentTaskToEdit] = useState(null);
   const [currentTaskIdToDelete, setCurrentTaskIdToDelete] = useState(null);
 
-  // Notificaciones: pedir permiso y preparar el sonido (se desbloquea al primer toque).
+  // Notificaciones: pedir permiso, preparar el sonido y registrar la entrega en
+  // segundo plano (push nativo en APK / Web Push en la PWA) para que suene aunque
+  // la app esté cerrada.
   useEffect(() => {
     ensureNotificationPermission();
     armAudioUnlock();
-  }, []);
+    initReminders(user.id);
+  }, [user.id]);
 
-  // Recordatorios locales (X minutos antes del horario) para tareas propias/asignadas.
+  // Recordatorios en primer plano (solo web, app abierta): chime propio.
   useTaskReminders(tasks, user.id);
+
+  // Reagenda las notificaciones nativas (APK) cada vez que cambian las tareas.
+  useEffect(() => {
+    syncReminders(tasks, user.id);
+  }, [tasks, user.id]);
+
+  // Banner visible dentro de la app cuando salta un recordatorio (respaldo por si
+  // el permiso del SO está denegado o el SW no está activo en dev).
+  const [reminderBanner, setReminderBanner] = useState(null);
+  useEffect(() => {
+    const onReminder = (e) => {
+      setReminderBanner(e.detail);
+      setTimeout(() => setReminderBanner(null), 8000);
+    };
+    window.addEventListener('MG_REMINDER', onReminder);
+    return () => window.removeEventListener('MG_REMINDER', onReminder);
+  }, []);
 
   useEffect(() => {
     loadTasks();
@@ -336,8 +368,20 @@ export default function EmpleadoDashboard() {
   };
 
   const handleComplete = async (id) => {
+    playPop(); // sonido de tarea completada (inmediato, antes de la red)
     try {
       const saved = await api(`/tasks/${id}/complete`, { method: 'PATCH' });
+      upsertTaskInState(saved);
+      loadTasks({ silent: true });
+    } catch (err) {
+      alert(err.message);
+    }
+  };
+
+  // Reactivar una tarea completada/fallida: vuelve a "pendiente".
+  const handleReopen = async (id) => {
+    try {
+      const saved = await api(`/tasks/${id}`, { method: 'PATCH', body: { status: 'pending', fail_reason: null } });
       upsertTaskInState(saved);
       loadTasks({ silent: true });
     } catch (err) {
@@ -406,7 +450,7 @@ export default function EmpleadoDashboard() {
         recurrence_time: formData.recurrence_time || null,
         recurrence_interval: formData.recurrence_interval ? Number(formData.recurrence_interval) : null,
         recurrence_days: formData.recurrence_days.length > 0 ? formData.recurrence_days.join(',') : null,
-        reminder_hours: formData.reminder_hours ? Number(formData.reminder_hours) : null,
+        reminder_hours: toReminderSeconds(formData.reminder_hours, formData.reminder_unit), // guardado en segundos
         motivation: formData.motivation || null,
       };
 
@@ -444,13 +488,34 @@ export default function EmpleadoDashboard() {
             Hola, <span className="text-slate-900 dark:text-slate-200">{user.full_name}</span>
           </p>
         </div>
-        <button 
-          onClick={handleLogout}
-          className="p-2 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 rounded-full transition-colors"
-        >
-          <LogOut size={20} />
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={handleLogout}
+            className="p-2 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 rounded-full transition-colors"
+          >
+            <LogOut size={20} />
+          </button>
+        </div>
       </header>
+
+      {/* Aviso de permisos de notificación (al iniciar sesión) */}
+      <NotificationGate userId={user.id} />
+
+      {/* Banner de recordatorio dentro de la app */}
+      {reminderBanner && (
+        <motion.div
+          initial={{ opacity: 0, y: -10 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="flex items-start gap-3 p-4 mb-4 rounded-xl bg-emerald-50 text-emerald-800 dark:bg-emerald-900/25 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-900/50"
+        >
+          <Bell size={20} className="shrink-0 mt-0.5" />
+          <div className="flex-1">
+            <p className="text-sm font-semibold">{reminderBanner.title}</p>
+            <p className="text-sm">{reminderBanner.body}</p>
+          </div>
+          <button onClick={() => setReminderBanner(null)} className="text-emerald-600 dark:text-emerald-400 shrink-0">✕</button>
+        </motion.div>
+      )}
 
       {/* Filters */}
       <div className="flex gap-3 mb-6">
@@ -505,9 +570,10 @@ export default function EmpleadoDashboard() {
                 animate={{ opacity: 1, scale: 1 }}
                 exit={{ opacity: 0, scale: 0.95 }}
               >
-                <TaskCard 
-                  task={task} 
+                <TaskCard
+                  task={task}
                   onComplete={handleComplete}
+                  onReopen={handleReopen}
                   onAction={(t) => (
                     <>
                       {/* Editar/Eliminar SOLO en tareas que creó el propio empleado.

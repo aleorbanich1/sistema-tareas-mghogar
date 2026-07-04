@@ -23,6 +23,8 @@ export function useAuthActions() {
   const login = useCallback((token, user) => {
     localStorage.setItem('mg_token', token);
     localStorage.setItem('mg_user', JSON.stringify(user));
+    // Reaparece el aviso de permisos de notificación en cada inicio de sesión.
+    sessionStorage.removeItem('mg_notif_gate_seen');
     setAuth({ token, user, isAuthenticated: true });
   }, [setAuth]);
 

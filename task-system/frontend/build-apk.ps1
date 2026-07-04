@@ -4,17 +4,19 @@
 #   $env:VITE_API_URL = "https://TU-PROYECTO.supabase.co/rest/v1"
 
 $ErrorActionPreference = 'Stop'
-$env:JAVA_HOME = 'C:\Program Files\Microsoft\jdk-17.0.19.10-hotspot'
-$env:ANDROID_HOME = 'C:\Android\Sdk'
-$env:ANDROID_SDK_ROOT = 'C:\Android\Sdk'
+# Java: usamos el que trae Android Studio (JBR). Si lo tenés en otra ruta, ajustá.
+$env:JAVA_HOME = 'C:\Program Files\Android\Android Studio\jbr'
+# SDK de Android (instalado por Android Studio en la carpeta del usuario).
+$env:ANDROID_HOME = "$env:LOCALAPPDATA\Android\Sdk"
+$env:ANDROID_SDK_ROOT = "$env:LOCALAPPDATA\Android\Sdk"
 
 Set-Location $PSScriptRoot
 
 Write-Host "==> 1/4 Build web (vite, comprimido)" -ForegroundColor Cyan
-npm run build
+yarn build
 
-Write-Host "==> 2/4 Copiar assets web al proyecto Android" -ForegroundColor Cyan
-npx cap copy android
+Write-Host "==> 2/4 Sincronizar web + plugins nativos al proyecto Android" -ForegroundColor Cyan
+yarn cap sync android
 
 Write-Host "==> 3/4 Compilar APK (Gradle)" -ForegroundColor Cyan
 Set-Location "$PSScriptRoot\android"

@@ -4,6 +4,11 @@ import { VitePWA } from 'vite-plugin-pwa'
 
 // https://vitejs.dev/config/
 export default defineConfig({
+  server: {
+    host: true, // escuchar en la red (para probar desde el celular / túneles)
+    // Permite abrir el dev server a través de túneles ngrok (el subdominio cambia).
+    allowedHosts: ['.ngrok-free.dev', '.ngrok-free.app', '.ngrok.io', '.ngrok.app'],
+  },
   plugins: [
     react(),
     VitePWA({
@@ -29,6 +34,9 @@ export default defineConfig({
       },
       workbox: {
         globPatterns: ['**/*.{js,css,html,svg,png,woff2}'],
+        // Inyecta los handlers de Web Push (push / notificationclick) en el SW
+        // generado, conservando todo el precache y runtimeCaching de abajo.
+        importScripts: ['push-sw.js'],
         navigateFallback: '/index.html',
         navigateFallbackDenylist: [/^\/api/],
         cleanupOutdatedCaches: true,

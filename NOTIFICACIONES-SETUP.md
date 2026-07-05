@@ -1,105 +1,125 @@
-# 🔔 Recordatorios que SUENAN (APK + Web) — Guía de instalación
+# MG Hogar — Guía del proyecto (setup + notas)
 
-Se agregó doble sistema de notificaciones para que los recordatorios suenen
-**aunque la app esté cerrada o el celular bloqueado**:
-
-- **APK (Android):** notificaciones **locales nativas** (Capacitor). Las agenda
-  el sistema operativo. **No necesita servidor.** Funciona 100% offline.
-- **Web (PWA):** **Web Push**. Una Edge Function de Supabase programada cada
-  minuto envía el aviso a la hora exacta. Requiere la config de abajo.
+Guía rápida para retomar el proyecto sin empezar de cero. Cubre: qué es la app,
+cómo se levanta, cómo se arma el APK, y el estado de Supabase.
 
 ---
 
-## ✅ Llaves VAPID ya generadas (para este proyecto)
+## ¿Qué es la app?
 
-```
-Public  key: BOqdDgxUACEprn0o4zhXQ12TN5pKs5iNWAAFd3lQ-3SBUd0o4n6sA2_bM0i68Nsd46IHty2jSSvrCEP5D9OS0IU
-Private key: Furh1ehfEizNpLsBskUV15tFvWmXqh5NoL4o4enWH7c
-```
+**Sistema de tareas para MG Hogar** (empresa de servicios del hogar). Es una
+**PWA web + app Android** (Capacitor). Dos roles:
 
-> La **pública** ya podés pegarla en `task-system/frontend/.env`.
-> La **privada** va SOLO en los secrets de Supabase (NUNCA en el frontend/git).
-> Si preferís generar tus propias llaves: `npx web-push generate-vapid-keys`.
+- **Socio / Jefe:** asigna tareas a cualquier empleado, ve todas, aprueba registros.
+- **Empleado:** ve sus tareas, se auto-asigna, las completa / reporta fallo.
 
----
-
-## 1) Frontend — pegar la clave pública
-
-En `task-system/frontend/.env`:
-
-```
-VITE_VAPID_PUBLIC_KEY=BOqdDgxUACEprn0o4zhXQ12TN5pKs5iNWAAFd3lQ-3SBUd0o4n6sA2_bM0i68Nsd46IHty2jSSvrCEP5D9OS0IU
-```
-
-Después rebuild: `yarn build` (y para el APK, `yarn cap sync android`).
+Funciones principales:
+- **Tareas** con prioridad (P1–P4), fecha + horario (el horario es solo para ordenar),
+  y **repetición**: diaria / semanal / mensual / **último día hábil del mes**.
+  Al completar una repetitiva, la app crea sola la próxima.
+- **Recordatorios repetitivos**: mientras la tarea esté pendiente, avisa cada X
+  (minutos u horas). Suenan con sonido + notificación.
+- **Chat** entre usuarios (con tareas adjuntas). Los mensajes son **temporales:
+  se borran a los 7 días**.
+- **Notificaciones**: nativas en el APK (suenan con la app cerrada) y Web Push en
+  la web (requiere setup de Supabase, ver abajo). Sonido "pop" al completar tarea.
+- **Offline**: las acciones se encolan y se sincronizan al volver la conexión.
 
 ---
 
-## 2) Supabase — base de datos (SQL Editor → Run)
+## Stack
 
-Pegá y ejecutá el contenido de:
-
-```
-supabase/migrations/0001_web_push_reminders.sql
-```
-
-Crea la tabla `push_subscriptions` y la columna `tasks.reminder_sent_at`.
-
----
-
-## 3) Supabase — desplegar la Edge Function
-
-Necesitás el [Supabase CLI](https://supabase.com/docs/guides/cli). Desde la raíz del repo:
-
-```bash
-supabase login
-supabase link --project-ref qsewancpibyyakitwpnr
-
-# Secrets (la privada VAPID + el secreto del cron):
-supabase secrets set VAPID_PUBLIC_KEY=BOqdDgxUACEprn0o4zhXQ12TN5pKs5iNWAAFd3lQ-3SBUd0o4n6sA2_bM0i68Nsd46IHty2jSSvrCEP5D9OS0IU
-supabase secrets set VAPID_PRIVATE_KEY=Furh1ehfEizNpLsBskUV15tFvWmXqh5NoL4o4enWH7c
-supabase secrets set VAPID_SUBJECT=mailto:tuemail@ejemplo.com
-supabase secrets set CRON_SECRET=elegí-un-texto-secreto-largo
-
-# Desplegar (sin verificación JWT: la protege el CRON_SECRET):
-supabase functions deploy send-reminders --no-verify-jwt
-```
-
-> `SUPABASE_URL` y `SUPABASE_SERVICE_ROLE_KEY` los inyecta Supabase solo; no hace falta setearlos.
+- **Frontend:** React 19 + Vite + `vite-plugin-pwa` + Tailwind. Gestor: **yarn**.
+- **Sin backend propio:** la app habla **directo con Supabase** (anon key + Supabase
+  Auth). El "traductor" de llamadas está en `src/utils/transport.js`.
+  (El viejo backend Express fue eliminado; no se usa.)
+- **Android:** Capacitor 8. Se arma con `build-apk.ps1`.
+- **Proyecto Supabase:** ref `qsewancpibyyakitwpnr`.
 
 ---
 
-## 4) Supabase — programar el cron (SQL Editor → Run)
+## Cómo iniciar la app (desarrollo)
 
-Abrí `supabase/migrations/0002_schedule_reminders_cron.sql`, reemplazá
-`<CRON_SECRET>` por el **mismo** valor del paso anterior, y ejecutalo.
-Deja la función corriendo cada minuto.
+```powershell
+cd C:\Users\Thiago\Desktop\hola\sistema-tareas-mghogar\task-system\frontend
+yarn dev
+```
 
-Verificar:
-```sql
-select * from cron.job;
-select * from cron.job_run_details order by start_time desc limit 20;
+Abre en **http://localhost:5173/**. Como habla directo con Supabase, **no hay que
+levantar ningún backend**.
+
+> **yarn**: si `yarn` no existe, activalo una vez con `corepack enable` (PowerShell
+> como Administrador). Alternativa sin instalar nada: usar `corepack yarn dev`.
+
+Para probar en el celular por HTTPS (necesario para sonido/notificaciones) se puede
+exponer con un túnel (ngrok); ya está permitido en `vite.config.js` (`allowedHosts`).
+
+---
+
+## Cómo armar el APK
+
+```powershell
+cd C:\Users\Thiago\Desktop\hola\sistema-tareas-mghogar\task-system\frontend
+powershell -ExecutionPolicy Bypass -File build-apk.ps1
+```
+
+Hace: `yarn build` → `yarn cap sync android` → compila con Gradle → deja
+**`MG-Hogar.apk`** en la carpeta del frontend. Requiere Android Studio (usa su Java
+JBR) y el SDK de Android; las rutas ya están puestas en el script.
+
+---
+
+## Supabase — cómo está y qué falta
+
+**Ya funcionando:**
+- **Auth**: login con Supabase Auth. La tabla `users` linkea `auth_id` ↔ `users.id`
+  y tiene `role` ('empleado' | 'socio' | 'jefe').
+- **Realtime**: cambios de `tasks` y `messages` en vivo (chat, actualizaciones).
+- **Recurrencia**: la genera la app al completar (no hay trigger). El viejo trigger
+  `tasks_recurrence` ya se **desactivó** (se dejó solo `tasks_updated_at`).
+
+**Migraciones en el repo** (`supabase/migrations/`, correr en SQL Editor):
+- `0003_rls_policies.sql` — **Seguridad (RLS)**. Importante: aplicar con cuidado,
+  tabla por tabla, verificando que todos los usuarios tengan `auth_id`. Trae el
+  rollback comentado por si algo se rompe.
+- `0004_cleanup_old_messages.sql` — borra automáticamente los mensajes de +7 días
+  (cron diario). Correr una vez.
+
+**Web Push (notificaciones en la web con la app cerrada) — OPCIONAL / pendiente:**
+- Hay una Edge Function en `supabase/functions/send-reminders/index.ts` que manda
+  los push. Para activarla hace falta: tabla `push_subscriptions` + columna
+  `tasks.reminder_sent_at`, desplegar la función con sus secrets (VAPID + CRON_SECRET)
+  y un cron cada minuto (pg_cron + pg_net).
+- **El APK NO depende de esto**: sus notificaciones son nativas y ya andan con la
+  app cerrada. Web Push es solo para que suenen en el navegador cuando está cerrado.
+
+**Llaves VAPID** (para Web Push; la pública ya está en `.env`):
+```
+Public : BOqdDgxUACEprn0o4zhXQ12TN5pKs5iNWAAFd3lQ-3SBUd0o4n6sA2_bM0i68Nsd46IHty2jSSvrCEP5D9OS0IU
+Private: Furh1ehfEizNpLsBskUV15tFvWmXqh5NoL4o4enWH7c   (va SOLO en secrets de Supabase)
 ```
 
 ---
 
-## 5) Probar
+## Notas / decisiones para tener en cuenta
 
-- **Web:** abrí la PWA, aceptá el permiso de notificaciones (se crea la
-  suscripción en `push_subscriptions`). Creá una tarea con recordatorio en
-  ~2 minutos. Cerrá la pestaña. Debe sonar/aparecer el aviso.
-- **APK:** instalá el nuevo APK, aceptá el permiso. Creá una tarea con
-  recordatorio cercano, cerrá la app. El SO la dispara con sonido.
+- **`reminder_hours`** en la tabla `tasks` ahora guarda **segundos** (nombre viejo;
+  la UI ofrece minutos/horas). El recordatorio es un **intervalo de repetición**,
+  no "X antes de la hora".
+- **Repetición**: se guarda como palabra clave en la columna `recurrence_days`
+  (`daily` | `weekly` | `monthly` | `last_business_day`). La lógica de la próxima
+  fecha está en `src/utils/recurrence.js`.
+- **Fechas**: se parsean al mediodía para evitar el desfase de zona horaria que
+  corría el día para atrás.
+- **Mensajes**: contador de no leídos por remitente; se borran a los 7 días (0004).
+- El sonido de Web Push / APK es el **sonido de notificación del sistema** (el chime
+  propio solo suena con la app abierta en la web).
 
 ---
 
-## Notas técnicas
+## Checklist de deploy (cuando toque)
 
-- **Zona horaria:** la función interpreta los horarios en **-03:00 (Argentina)**.
-  Si operan en otra zona, cambiá `TZ_OFFSET` en
-  `supabase/functions/send-reminders/index.ts`.
-- El campo `reminder_hours` en realidad guarda **minutos** (la UI dice "minutos").
-- El sonido en Web Push / APK es el **sonido de notificación del sistema**
-  (no el chime WebAudio propio, que solo suena con la app abierta en la web).
-- Sin `VITE_VAPID_PUBLIC_KEY` la web simplemente no suscribe (no rompe nada);
-  el APK funciona igual porque no depende de Web Push.
+1. Frontend web: `yarn build` → subir `dist/` (o que Netlify buildee del repo).
+2. APK: `build-apk.ps1` → distribuir `MG-Hogar.apk`.
+3. Supabase: correr `0003` (RLS) y `0004` (limpieza de mensajes).
+4. (Opcional) Activar Web Push: desplegar la Edge Function + tabla + cron.

@@ -23,14 +23,21 @@ function formatDue(due, time) {
 
 export const TaskCard = memo(function TaskCard({ task, onComplete, onAction, onReopen, isSocio }) {
   const isDone = task.status === 'done';
-  const isClosed = task.status === 'done' || task.status === 'failed';
+  const isFailed = task.status === 'failed';
+  const isClosed = isDone || isFailed;
+  // Tareas falladas en la vista del empleado: tachadas en rojo y más chicas.
+  const shrinkFailed = isFailed && !isSocio;
   // Defensivo: si un payload en tiempo real llega sin priority, no tumbar la app.
   const pClass = (task.priority || '').toLowerCase();
 
   return (
     <div className={cn(
-      "w-[85%] mx-auto relative p-5 rounded-2xl border transition-colors duration-300",
-      isDone ? "bg-slate-50 border-slate-100 dark:bg-slate-900/50 dark:border-slate-800/50 opacity-75" : "bg-white border-slate-200 dark:bg-slate-900 dark:border-slate-800 shadow-sm"
+      "mx-auto relative rounded-2xl border transition-all duration-300",
+      shrinkFailed
+        ? "w-[62%] p-3 bg-red-50/60 border-red-100 dark:bg-red-900/10 dark:border-red-900/30 opacity-80"
+        : isDone
+          ? "w-[85%] p-5 bg-slate-50 border-slate-100 dark:bg-slate-900/50 dark:border-slate-800/50 opacity-75"
+          : "w-[85%] p-5 bg-white border-slate-200 dark:bg-slate-900 dark:border-slate-800 shadow-sm"
     )}>
       <div className="flex items-start gap-4">
         {/* Check Circle */}
@@ -80,8 +87,13 @@ export const TaskCard = memo(function TaskCard({ task, onComplete, onAction, onR
           </div>
           
           <h3 className={cn(
-            "text-lg font-semibold tracking-tight mb-2",
-            isDone ? "text-slate-500 dark:text-slate-400 line-through decoration-slate-300 dark:decoration-slate-600" : "text-slate-900 dark:text-slate-50"
+            "font-semibold tracking-tight mb-2",
+            shrinkFailed ? "text-sm" : "text-lg",
+            isFailed
+              ? "text-red-600 dark:text-red-400 line-through decoration-red-500/70"
+              : isDone
+                ? "text-slate-500 dark:text-slate-400 line-through decoration-slate-300 dark:decoration-slate-600"
+                : "text-slate-900 dark:text-slate-50"
           )}>
             {task.title}
           </h3>

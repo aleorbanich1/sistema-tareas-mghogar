@@ -468,7 +468,6 @@ export default function EmpleadoDashboard() {
           <option value="pending">Pendiente</option>
           <option value="done">Hecho</option>
           <option value="failed">No pudo completarse</option>
-          <option value="info_needed">Falta info</option>
         </Select>
         <Select 
           value={priorityFilter} 
@@ -536,19 +535,18 @@ export default function EmpleadoDashboard() {
                       )}
                       {!['done', 'failed'].includes(t.status) && (
                         <>
-                          <Button 
-                            variant="secondary" 
-                            size="sm" 
-                            onClick={() => {
-                              if (t.creator && t.creator.id) {
+                          {/* Duda / Chat SOLO si la tarea la creó otro (ej. Ale), no uno mismo. */}
+                          {t.creator && Number(t.creator.id) !== Number(user.id) && (
+                            <Button
+                              variant="secondary"
+                              size="sm"
+                              onClick={() => {
                                 window.dispatchEvent(new CustomEvent('OPEN_CHAT', { detail: { userId: t.creator.id, prefilledTask: t } }));
-                              } else {
-                                window.dispatchEvent(new CustomEvent('OPEN_CHAT', { detail: { prefilledTask: t } }));
-                              }
-                            }}
-                          >
-                            Duda / Chat
-                          </Button>
+                              }}
+                            >
+                              Duda / Chat
+                            </Button>
+                          )}
                           <Button variant="danger" size="sm" onClick={() => openFailModal(t.id)}>
                             Reportar Fallo
                           </Button>

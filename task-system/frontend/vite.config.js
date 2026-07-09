@@ -55,8 +55,11 @@ export default defineConfig({
             },
           },
           {
-            // API GETs — fresh-first, fall back to cache offline
-            urlPattern: ({ url }) => url.pathname.startsWith('/api'),
+            // API GETs (Supabase REST) — fresh-first, fall back to cache offline.
+            // Ojo: antes el patrón era url.pathname.startsWith('/api') (resto del
+            // backend Express) y no matcheaba nunca: la app habla con Supabase.
+            urlPattern: ({ url }) =>
+              url.hostname.endsWith('.supabase.co') && url.pathname.startsWith('/rest/'),
             handler: 'NetworkFirst',
             method: 'GET',
             options: {

@@ -3,6 +3,7 @@ import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-d
 import { socket, flushSyncQueue } from './utils/api';
 import { AuthContext, getAuthFromStorage } from './utils/auth';
 import { ErrorBoundary } from './components/ErrorBoundary';
+import { EscalationNotifications } from './components/EscalationNotifications';
 
 const Login = lazy(() => import('./pages/Login'));
 const Register = lazy(() => import('./pages/Register'));
@@ -39,6 +40,8 @@ function App() {
       <Router>
         <div className="w-full min-h-[100dvh] flex flex-col bg-slate-50 dark:bg-slate-950 overflow-hidden">
           <div className="flex flex-col flex-1 px-5 py-8">
+            {/* Notificaciones permanentes de Manychat: arriba de todo, en el flujo */}
+            {isAuthenticated && <EscalationNotifications />}
             <ErrorBoundary>
             <Suspense fallback={<RouteSkeleton />}>
               <Routes>

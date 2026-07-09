@@ -123,3 +123,85 @@ Private: Furh1ehfEizNpLsBskUV15tFvWmXqh5NoL4o4enWH7c   (va SOLO en secrets de Su
 2. APK: `build-apk.ps1` → distribuir `MG-Hogar.apk`.
 3. Supabase: correr `0003` (RLS) y `0004` (limpieza de mensajes).
 4. (Opcional) Activar Web Push: desplegar la Edge Function + tabla + cron.
+5. Notificaciones de Manychat: correr `0006` + desplegar la Edge Function (ver abajo).
+   (`0006` NO usa RLS, no depende de `0003`.)
+
+---
+
+## Notificaciones de escalamiento (Manychat → sistema de tareas)
+
+Cuando el bot de Manychat detecta una conversación que necesita intervención
+humana, le pega a una **API en Supabase** que crea una **notificación PERMANENTE**
+(NO una tarea). Aparece como un banner fijo y se apaga cuando alguien toca
+"Resolver" (se resuelve para **todos** los destinatarios).
+
+**Dónde vive la API:** en Supabase (Edge Function), NO en Netlify ni en local. La
+URL es fija para todos los clientes, esté la web en Netlify o en `localhost`,
+porque el único backend real es Supabase. Manychat siempre le pega a Supabase.
+
+**Piezas:**
+- Migración: `supabase/migrations/0006_escalation_notifications.sql` — tablas
+  `notifications`, `notification_recipients`, `notification_routes` + Realtime +
+  cron que borra las de **+36 h** (para que la tabla no explote). **No usa RLS**
+  (igual que el resto de la app; la seguridad la da el token del webhook).
+- Edge Function: `supabase/functions/manychat-notification/index.ts` — recibe el
+  webhook, valida el token secreto y se la manda a todas las personas activadas.
+- Frontend: `EscalationNotifications.jsx` (banner global, todos los roles) y
+  `NotificationRoutingPanel.jsx` (panel del jefe, botón de campana en el header).
+
+### Deploy (una vez)
+
+```powershell
+# 1) Base de datos: pegar 0006 en Supabase → SQL Editor → Run
+# 2) Secret del webhook (elegí un string secreto y largo):
+supabase secrets set MANYCHAT_WEBHOOK_SECRET=un-secreto-largo-y-random
+# 3) Desplegar la función CON --no-verify-jwt (importante, ver nota abajo):
+supabase functions deploy manychat-notification --no-verify-jwt
+```
+
+> **`--no-verify-jwt` es obligatorio.** Por defecto el gateway de Supabase exige un
+> JWT válido en el header `Authorization` y devuelve **401** antes de correr la
+> función. Manychat manda ahí su propio secreto, no un JWT, así que hay que apagar
+> esa verificación. La seguridad la da el token que valida la función.
+>
+> Correr `supabase functions deploy` desde la **raíz del repo** (donde está la
+> carpeta `supabase/`), no desde `task-system/frontend`.
+
+URL que queda (reemplazá el ref si cambia): 
+`https://qsewancpibyyakitwpnr.supabase.co/functions/v1/manychat-notification`
+
+### Config en Manychat (External Request / acción HTTP)
+
+- **Method:** POST
+- **URL:** la de arriba
+- **Headers:**
+  - `Authorization: Bearer un-secreto-largo-y-random`  (el mismo del secret)
+  - `Content-Type: application/json`
+- **Body (JSON):**
+  ```json
+  {
+    "cliente_nombre": "{{full_name}}",
+    "cliente_telefono": "{{whatsapp_id}}",
+    "mensaje_cliente": "{{ultimo_mensaje_cliente}}",
+    "motivo": "{{motivo_escalamiento}}"
+  }
+  ```
+
+### Configurar QUIÉN recibe (panel del jefe)
+
+En la cuenta del jefe, botón de **campana** (🔔) arriba a la derecha. Es un
+**toggle por persona**: la que esté activada recibe TODAS las notificaciones de
+escalamiento (no se rutea por `motivo`, porque el motivo lo genera un bot de IA y
+es impredecible). El campo `motivo` igual llega y se muestra en el banner como dato.
+Ojo: si no hay nadie activado, la notificación se crea pero **no le llega a nadie**.
+
+### Probar sin Manychat (curl)
+
+```bash
+curl -X POST "https://qsewancpibyyakitwpnr.supabase.co/functions/v1/manychat-notification" \
+  -H "Authorization: Bearer un-secreto-largo-y-random" \
+  -H "Content-Type: application/json" \
+  -d '{"cliente_nombre":"Ana Test","cliente_telefono":"5491122334455","mensaje_cliente":"Necesito hablar con alguien","motivo":"reclamo"}'
+```
+Respuesta esperada: `{"ok":true,"notification_id":"...","delivered":N}`. Si
+`delivered` es 0, no hay nadie ruteado para ese motivo (revisá el panel).

@@ -19,6 +19,7 @@ import { initReminders, syncReminders } from '../utils/reminders';
 import { REMINDER_UNITS, toReminderSeconds, fromReminderSeconds } from '../utils/reminderUnit';
 import { RECURRENCE_OPTIONS } from '../utils/recurrence';
 import { NotificationGate } from '../components/NotificationGate';
+import { NotificationRoutingPanel } from '../components/NotificationRoutingPanel';
 
 // Iniciales para el avatar del registro (ej. "Olivia Sterling" → "OS").
 function initials(name = '') {
@@ -217,6 +218,9 @@ export default function SocioDashboard() {
   const [regsLoading, setRegsLoading] = useState(false);
   const [regBusyId, setRegBusyId] = useState(null);
   const [confirmRejectId, setConfirmRejectId] = useState(null);
+
+  // Panel de ruteo de notificaciones de Manychat (solo jefe)
+  const [routingModalOpen, setRoutingModalOpen] = useState(false);
   
   // Filters
   const [activeTab, setActiveTab] = useState('activas'); // 'activas' | 'historial'
@@ -454,6 +458,15 @@ export default function SocioDashboard() {
         <div className="flex items-center gap-2">
           {isJefe && (
             <button
+              onClick={() => setRoutingModalOpen(true)}
+              aria-label="Notificaciones de Manychat"
+              className="p-2 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 rounded-full transition-colors"
+            >
+              <Bell size={20} />
+            </button>
+          )}
+          {isJefe && (
+            <button
               onClick={() => { setRegsModalOpen(true); loadPendingRegs(); }}
               aria-label="Registros pendientes"
               className="relative p-2 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 rounded-full transition-colors"
@@ -628,6 +641,14 @@ export default function SocioDashboard() {
           <Button variant="danger" className="flex-1" onClick={confirmDelete}>Eliminar</Button>
         </div>
       </Modal>
+
+      {/* Ruteo de notificaciones de Manychat (solo jefe) */}
+      {isJefe && (
+        <NotificationRoutingPanel
+          isOpen={routingModalOpen}
+          onClose={() => setRoutingModalOpen(false)}
+        />
+      )}
 
       {/* Registros pendientes (solo jefe) */}
       {isJefe && (

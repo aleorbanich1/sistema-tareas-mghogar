@@ -18,6 +18,7 @@ import { initReminders, syncReminders } from '../utils/reminders';
 import { REMINDER_UNITS, toReminderSeconds, fromReminderSeconds } from '../utils/reminderUnit';
 import { RECURRENCE_OPTIONS } from '../utils/recurrence';
 import { NotificationGate } from '../components/NotificationGate';
+import { sortTasks } from '../utils/taskSort';
 
 // Componente para Formulario de Tarea (adaptado para el empleado)
 const TaskFormModal = ({ isOpen, onClose, initialTask, employees, onSave, user }) => {
@@ -486,7 +487,7 @@ export default function EmpleadoDashboard() {
       </div>
 
       {/* Task List */}
-      <div className="flex-1 overflow-y-auto -mx-5 px-5 pb-safe space-y-4">
+      <div className="flex-1 overflow-y-auto -mx-5 px-5 pb-safe space-y-2">
         {loading ? (
           <div className="flex items-center justify-center gap-2 p-8 text-slate-500">
             <Loader2 size={18} className="animate-spin" /> Cargando tareas...
@@ -502,7 +503,7 @@ export default function EmpleadoDashboard() {
           </div>
         ) : (
           <AnimatePresence>
-            {tasks.map((task) => (
+            {sortTasks(tasks).map((task) => (
               <motion.div
                 key={task.id}
                 initial={{ opacity: 0, scale: 0.95 }}

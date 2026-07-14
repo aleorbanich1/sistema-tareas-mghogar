@@ -28,11 +28,21 @@ export function useAuthActions() {
     setAuth({ token, user, isAuthenticated: true });
   }, [setAuth]);
 
+  // Actualiza el usuario guardado (ej: cambió de rol al transferir la jefatura)
+  // sin cerrar sesión, para que las rutas y los dashboards reaccionen al toque.
+  const updateUser = useCallback((patch) => {
+    let current = {};
+    try { current = JSON.parse(localStorage.getItem('mg_user') || '{}'); } catch {}
+    const user = { ...current, ...patch };
+    localStorage.setItem('mg_user', JSON.stringify(user));
+    setAuth(prev => ({ ...prev, user }));
+  }, [setAuth]);
+
   const logout = useCallback(() => {
     supabase.auth.signOut().catch(() => {});
     localStorage.clear();
     setAuth({ token: null, user: null, isAuthenticated: false });
   }, [setAuth]);
 
-  return { login, logout };
+  return { login, logout, updateUser };
 }

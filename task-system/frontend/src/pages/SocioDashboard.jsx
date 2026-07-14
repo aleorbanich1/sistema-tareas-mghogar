@@ -7,7 +7,7 @@ import { Select } from '../components/ui/Select';
 import { Modal } from '../components/ui/Modal';
 import { CalendarPicker } from '../components/ui/CalendarPicker';
 import { TaskCard } from '../components/TaskCard';
-import { MessageCircle, Plus, Edit2, Trash2, Loader2, Check, Bell, Home, LogOut, UserPlus, X, Clock } from 'lucide-react';
+import { MessageCircle, Plus, Edit2, Trash2, Loader2, Check, Bell, Home, LogOut, UserPlus, X, Clock, Crown } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { cn } from '../utils/cn';
 import { useAuthActions } from '../utils/auth';
@@ -20,6 +20,8 @@ import { REMINDER_UNITS, toReminderSeconds, fromReminderSeconds } from '../utils
 import { RECURRENCE_OPTIONS } from '../utils/recurrence';
 import { NotificationGate } from '../components/NotificationGate';
 import { NotificationRoutingPanel } from '../components/NotificationRoutingPanel';
+import { TransferJefeModal } from '../components/TransferJefeModal';
+import { sortTasks } from '../utils/taskSort';
 
 // Iniciales para el avatar del registro (ej. "Olivia Sterling" → "OS").
 function initials(name = '') {
@@ -204,9 +206,12 @@ const TaskFormModal = memo(({ isOpen, onClose, initialTask, employees, onSave, u
 
 export default function SocioDashboard() {
   const navigate = useNavigate();
-  const { logout } = useAuthActions();
+  const { logout, updateUser } = useAuthActions();
   const user = JSON.parse(localStorage.getItem('mg_user') || '{}');
   const isJefe = user.role === 'jefe';
+
+  // Transferencia de jefatura (irreversible, solo jefe)
+  const [transferModalOpen, setTransferModalOpen] = useState(false);
 
   const [tasks, setTasks] = useState([]);
   const [employees, setEmployees] = useState([]);
@@ -379,6 +384,14 @@ export default function SocioDashboard() {
     navigate('/', { replace: true });
   };
 
+  // Transferencia hecha: ya soy empleado. Actualizo la sesión y me voy a mi panel.
+  const handleTransferred = (newJefe) => {
+    setTransferModalOpen(false);
+    updateUser({ role: 'empleado' });
+    alert(`Listo. ${newJefe.full_name} ahora es el jefe. Vos pasaste a ser empleado.`);
+    navigate('/empleado', { replace: true });
+  };
+
   const handleComplete = async (id) => {
     playPop(); // sonido de tarea completada (inmediato, antes de la red)
     try {
@@ -463,6 +476,15 @@ export default function SocioDashboard() {
               className="p-2 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 rounded-full transition-colors"
             >
               <Bell size={20} />
+            </button>
+          )}
+          {isJefe && (
+            <button
+              onClick={() => setTransferModalOpen(true)}
+              aria-label="Transferir jefatura"
+              className="p-2 text-slate-400 hover:text-amber-600 dark:hover:text-amber-400 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 rounded-full transition-colors"
+            >
+              <Crown size={20} />
             </button>
           )}
           {isJefe && (
@@ -569,21 +591,20 @@ export default function SocioDashboard() {
       </div>
 
       {/* Task List */}
-      <div className="flex-1 overflow-y-auto -mx-5 px-5 pb-safe space-y-4">
+      <div className="flex-1 overflow-y-auto -mx-5 px-5 pb-safe space-y-2">
         {loading ? (
           <div className="flex items-center justify-center gap-2 p-8 text-slate-500"><Loader2 size={18} className="animate-spin" /> Cargando...</div>
         ) : tasks.length === 0 ? (
           <div className="text-center p-8 text-slate-500">No hay tareas.</div>
         ) : (
           <AnimatePresence>
-            {tasks
+            {sortTasks(tasks
               .filter(t => activeTab === 'activas' ? t.status === 'pending' : t.status !== 'pending')
-              .filter(t => (activeTab === 'historial' && statusFilter) ? t.status === statusFilter : true)
+              .filter(t => (activeTab === 'historial' && statusFilter) ? t.status === statusFilter : true))
               .map(task => (
               <motion.div key={task.id} initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
                 <TaskCard
                   task={task}
-                  isSocio={true}
                   onComplete={Number(task.assigned_to) === Number(user.id) ? handleComplete : undefined}
                   onReopen={handleReopen}
                   onAction={(t) => (
@@ -641,6 +662,16 @@ export default function SocioDashboard() {
           <Button variant="danger" className="flex-1" onClick={confirmDelete}>Eliminar</Button>
         </div>
       </Modal>
+
+      {/* Transferencia de jefatura (solo jefe) */}
+      {isJefe && (
+        <TransferJefeModal
+          isOpen={transferModalOpen}
+          onClose={() => setTransferModalOpen(false)}
+          me={user}
+          onTransferred={handleTransferred}
+        />
+      )}
 
       {/* Ruteo de notificaciones de Manychat (solo jefe) */}
       {isJefe && (

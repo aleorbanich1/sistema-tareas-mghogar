@@ -1,6 +1,7 @@
 import React, { useState, useEffect, memo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api, socket } from '../utils/api';
+import { isEmployeeSelfTask } from '../utils/transport';
 import { Button } from '../components/ui/Button';
 import { Input } from '../components/ui/Input';
 import { Select } from '../components/ui/Select';
@@ -213,6 +214,11 @@ export default function SocioDashboard() {
   // Transferencia de jefatura (irreversible, solo jefe)
   const [transferModalOpen, setTransferModalOpen] = useState(false);
 
+  // Tareas recién completadas (muestran contador de 30s) y las ya esfumadas.
+  const [justCompleted, setJustCompleted] = useState(() => new Set());
+  const [dismissed, setDismissed] = useState(() => new Set());
+  const dismissTask = (id) => setDismissed(prev => new Set(prev).add(id));
+
   const [tasks, setTasks] = useState([]);
   const [employees, setEmployees] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -394,10 +400,13 @@ export default function SocioDashboard() {
 
   const handleComplete = async (id) => {
     playPop(); // sonido de tarea completada (inmediato, antes de la red)
+    // Queda visible con contador de 30s antes de esfumarse (no recargamos la
+    // lista en silencio para no sacarla de la pestaña "Activas" al toque).
+    setJustCompleted(prev => new Set(prev).add(id));
+    setDismissed(prev => { const n = new Set(prev); n.delete(id); return n; });
     try {
       const saved = await api(`/tasks/${id}/complete`, { method: 'PATCH' });
       upsertTaskInState(saved);
-      loadTasks({ silent: true });
     } catch (err) {
       alert(err.message);
     }
@@ -599,13 +608,17 @@ export default function SocioDashboard() {
         ) : (
           <AnimatePresence>
             {sortTasks(tasks
-              .filter(t => activeTab === 'activas' ? t.status === 'pending' : t.status !== 'pending')
+              .filter(t => !isEmployeeSelfTask(t))
+              .filter(t => activeTab === 'activas'
+                ? ((t.status === 'pending' || justCompleted.has(t.id)) && !dismissed.has(t.id))
+                : t.status !== 'pending')
               .filter(t => (activeTab === 'historial' && statusFilter) ? t.status === statusFilter : true))
               .map(task => (
               <motion.div key={task.id} initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
                 <TaskCard
                   task={task}
                   onComplete={Number(task.assigned_to) === Number(user.id) ? handleComplete : undefined}
+                  onExpire={activeTab === 'activas' && justCompleted.has(task.id) ? dismissTask : undefined}
                   onReopen={handleReopen}
                   onAction={(t) => (
                     <>

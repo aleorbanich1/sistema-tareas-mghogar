@@ -1,6 +1,6 @@
-import React, { memo, useState } from 'react';
+import React, { memo, useState, useEffect } from 'react';
 import { cn } from '../utils/cn';
-import { CheckCircle2, XCircle, Lightbulb, RotateCcw, Repeat, AlertTriangle, ChevronDown } from 'lucide-react';
+import { CheckCircle2, XCircle, Lightbulb, RotateCcw, Repeat, AlertTriangle, ChevronDown, Clock3 } from 'lucide-react';
 import { recurrenceLabel } from '../utils/recurrence';
 import { isOverdue } from '../utils/taskSort';
 
@@ -33,7 +33,10 @@ function formatDue(due, time) {
   return parts.join(' · ');
 }
 
-export const TaskCard = memo(function TaskCard({ task, onComplete, onAction, onReopen }) {
+// Segundos que una tarea recién completada queda visible antes de esfumarse.
+const DISMISS_SECONDS = 30;
+
+export const TaskCard = memo(function TaskCard({ task, onComplete, onUncomplete, onAction, onReopen, onExpire }) {
   const [expanded, setExpanded] = useState(false);
 
   const isDone = task.status === 'done';
@@ -45,7 +48,33 @@ export const TaskCard = memo(function TaskCard({ task, onComplete, onAction, onR
 
   const due = formatDue(task.due_date, task.recurrence_time);
   const recurrence = recurrenceLabel(task.recurrence_days);
-  const hasDetails = !!(task.description || task.motivation || task.fail_reason);
+  // La descripción se muestra siempre (recortada); el resto va en el desplegable.
+  const hasExtra = !!(task.motivation || task.fail_reason);
+
+  // Contador rojo de 30s: al llegar a 0 la tarea recién completada desaparece.
+  const [remaining, setRemaining] = useState(null);
+  useEffect(() => {
+    if (!(isDone && onExpire)) { setRemaining(null); return; }
+    setRemaining(DISMISS_SECONDS);
+    const started = Date.now();
+    const iv = setInterval(() => {
+      const left = DISMISS_SECONDS - Math.floor((Date.now() - started) / 1000);
+      if (left <= 0) {
+        clearInterval(iv);
+        setRemaining(0);
+        onExpire(task.id);
+      } else {
+        setRemaining(left);
+      }
+    }, 500);
+    return () => clearInterval(iv);
+  }, [isDone, onExpire, task.id]);
+
+  const canUncomplete = isDone && !!onUncomplete;
+  const handleCheck = () => {
+    if (isDone) { if (onUncomplete) onUncomplete(task.id); }
+    else if (onComplete) onComplete(task.id);
+  };
 
   return (
     <div className={cn(
@@ -58,11 +87,12 @@ export const TaskCard = memo(function TaskCard({ task, onComplete, onAction, onR
           : "bg-white border-slate-200 dark:bg-slate-900 dark:border-slate-800"
     )}>
       <div className="flex items-start gap-2.5">
-        {/* Check */}
+        {/* Check (tocarlo de nuevo cuando está hecha lo deshace, si onUncomplete) */}
         <button
-          onClick={() => !isDone && onComplete && onComplete(task.id)}
-          disabled={isDone || isFailed || !onComplete}
-          aria-label="Completar tarea"
+          onClick={handleCheck}
+          disabled={isFailed || (isDone ? !onUncomplete : !onComplete)}
+          aria-label={isDone ? (canUncomplete ? 'Deshacer, volver a pendiente' : 'Tarea completada') : 'Completar tarea'}
+          title={canUncomplete ? 'Tocá para deshacer' : undefined}
           className={cn(
             "mt-0.5 flex-shrink-0 w-5 h-5 rounded-full border-2 flex items-center justify-center transition-colors",
             isDone
@@ -89,17 +119,35 @@ export const TaskCard = memo(function TaskCard({ task, onComplete, onAction, onR
             )}>
               {task.title}
             </h3>
-            {hasDetails && (
+            {remaining != null && (
+              <span
+                className="ml-auto shrink-0 inline-flex items-center gap-1 text-[11px] font-bold text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-900/25 px-1.5 py-0.5 rounded-full tabular-nums"
+                title="Desaparece en unos segundos"
+              >
+                <Clock3 size={11} /> {remaining}s
+              </span>
+            )}
+            {hasExtra && (
               <button
                 onClick={() => setExpanded(v => !v)}
                 aria-label={expanded ? 'Ocultar detalles' : 'Ver detalles'}
                 aria-expanded={expanded}
-                className="ml-auto shrink-0 p-0.5 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200"
+                className={cn("shrink-0 p-0.5 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200", remaining == null && "ml-auto")}
               >
                 <ChevronDown size={14} className={cn("transition-transform", expanded && "rotate-180")} />
               </button>
             )}
           </div>
+
+          {/* Descripción: siempre visible, recortada a un par de líneas. */}
+          {task.description && (
+            <p className={cn(
+              "mt-1 text-xs leading-snug line-clamp-2",
+              isClosed ? "text-slate-400 dark:text-slate-500" : "text-slate-600 dark:text-slate-300"
+            )}>
+              {task.description}
+            </p>
+          )}
 
           {/* Meta en una línea */}
           {(due || recurrence || task.assignee || overdue || isFailed) && (
@@ -138,14 +186,9 @@ export const TaskCard = memo(function TaskCard({ task, onComplete, onAction, onR
             </div>
           )}
 
-          {/* Detalles (colapsados por defecto) */}
+          {/* Detalles extra (motivación / motivo de fallo), colapsados por defecto */}
           {expanded && (
             <div className="mt-2 flex flex-col gap-1.5">
-              {task.description && (
-                <p className="text-xs text-slate-600 dark:text-slate-300 bg-slate-50 dark:bg-slate-800/50 px-2.5 py-2 rounded-lg">
-                  {task.description}
-                </p>
-              )}
               {task.motivation && (
                 <div className="flex gap-1.5 text-xs text-amber-700 dark:text-amber-400 bg-amber-50 dark:bg-amber-900/20 px-2.5 py-2 rounded-lg">
                   <Lightbulb size={13} className="shrink-0 mt-0.5" />

@@ -188,6 +188,11 @@ export default function EmpleadoDashboard() {
   const [statusFilter, setStatusFilter] = useState('');
   const [priorityFilter, setPriorityFilter] = useState('');
 
+  // Tareas recién completadas (contador de 30s) y las que ya se esfumaron.
+  const [justCompleted, setJustCompleted] = useState(() => new Set());
+  const [dismissed, setDismissed] = useState(() => new Set());
+  const dismissTask = (id) => setDismissed(prev => new Set(prev).add(id));
+
   const [failModalOpen, setFailModalOpen] = useState(false);
   const [failTaskId, setFailTaskId] = useState(null);
   const [failReason, setFailReason] = useState('');
@@ -310,17 +315,21 @@ export default function EmpleadoDashboard() {
 
   const handleComplete = async (id) => {
     playPop(); // sonido de tarea completada (inmediato, antes de la red)
+    // Queda visible con el contador de 30s antes de esfumarse.
+    setJustCompleted(prev => new Set(prev).add(id));
+    setDismissed(prev => { const n = new Set(prev); n.delete(id); return n; });
     try {
       const saved = await api(`/tasks/${id}/complete`, { method: 'PATCH' });
       upsertTaskInState(saved);
-      loadTasks({ silent: true });
     } catch (err) {
       alert(err.message);
     }
   };
 
-  // Reactivar una tarea completada/fallida: vuelve a "pendiente".
-  const handleReopen = async (id) => {
+  // Deshacer: tocar de nuevo el check de una tarea hecha la vuelve a "pendiente".
+  const handleUncomplete = async (id) => {
+    setJustCompleted(prev => { const n = new Set(prev); n.delete(id); return n; });
+    setDismissed(prev => { const n = new Set(prev); n.delete(id); return n; });
     try {
       const saved = await api(`/tasks/${id}`, { method: 'PATCH', body: { status: 'pending', fail_reason: null } });
       upsertTaskInState(saved);
@@ -503,7 +512,7 @@ export default function EmpleadoDashboard() {
           </div>
         ) : (
           <AnimatePresence>
-            {sortTasks(tasks).map((task) => (
+            {sortTasks(tasks.filter(t => !dismissed.has(t.id))).map((task) => (
               <motion.div
                 key={task.id}
                 initial={{ opacity: 0, scale: 0.95 }}
@@ -513,7 +522,8 @@ export default function EmpleadoDashboard() {
                 <TaskCard
                   task={task}
                   onComplete={handleComplete}
-                  onReopen={handleReopen}
+                  onUncomplete={handleUncomplete}
+                  onExpire={justCompleted.has(task.id) ? dismissTask : undefined}
                   onAction={(t) => (
                     <>
                       {/* Editar/Eliminar SOLO en tareas que creó el propio empleado.

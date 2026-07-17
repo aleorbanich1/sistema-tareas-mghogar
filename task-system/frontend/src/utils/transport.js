@@ -6,7 +6,15 @@ import { isRecurring, nextOccurrence } from './recurrence';
 
 // Embebido de relaciones (mismos nombres de FK que usaba el backend).
 const TASK_SELECT =
-  '*, assignee:users!tasks_assigned_to_fkey(id,username,full_name), creator:users!tasks_created_by_fkey(id,username,full_name)';
+  '*, assignee:users!tasks_assigned_to_fkey(id,username,full_name), creator:users!tasks_created_by_fkey(id,username,full_name,role)';
+
+// El jefe/socio no ve las tareas que un empleado se crea para sí mismo
+// (mismo assigned_to y created_by, y el creador es empleado). Las tareas que
+// el jefe asigna al empleado sí se ven (ahí el creador es el jefe).
+export function isEmployeeSelfTask(t) {
+  return t?.creator?.role === 'empleado' &&
+    t.assigned_to != null && Number(t.assigned_to) === Number(t.created_by);
+}
 const MSG_SELECT =
   '*, sender:users!messages_from_user_fkey(id,username,full_name), receiver:users!messages_to_user_fkey(id,username,full_name)';
 
@@ -121,6 +129,20 @@ async function maybeCreateRecurrence(task) {
   const nextDate = nextOccurrence(pattern, task.due_date);
   if (!nextDate) return;
 
+  // Dedup: si ya existe la próxima ocurrencia (mismo título, asignado, fecha y
+  // patrón, todavía pendiente) no la volvemos a crear. Protege contra un trigger
+  // viejo de Postgres que también genere la recurrencia (ver migración 0008).
+  let existingQ = supabase.from('tasks').select('id')
+    .eq('title', task.title)
+    .eq('due_date', nextDate)
+    .eq('recurrence_days', pattern)
+    .eq('status', 'pending');
+  existingQ = task.assigned_to == null
+    ? existingQ.is('assigned_to', null)
+    : existingQ.eq('assigned_to', task.assigned_to);
+  const { data: dup } = await existingQ.limit(1);
+  if (dup && dup.length > 0) return;
+
   const insert = {
     title: task.title,
     description: task.description || '',
@@ -207,7 +229,9 @@ export async function request(path, method = 'GET', body = null) {
       }
       const { data, error } = await q;
       if (error) throw error;
-      return data || [];
+      let rows = data || [];
+      if (['socio', 'jefe'].includes(me().role)) rows = rows.filter(t => !isEmployeeSelfTask(t));
+      return rows;
     }
     if (rawPath === '/tasks' && method === 'POST') return await createTask(body, false);
     if (rawPath === '/tasks/self' && method === 'POST') return await createTask(body, true);
@@ -236,10 +260,24 @@ export async function request(path, method = 'GET', body = null) {
           patch = {};
           for (const k of TASK_PATCH_FIELDS) if (body && body[k] !== undefined) patch[k] = body[k];
         }
-        const { data, error } = await supabase.from('tasks').update(patch).eq(col, val).select(TASK_SELECT).single();
+
+        // Estado previo: solo generamos la próxima ocurrencia si la tarea pasa
+        // DE pendiente A hecha. Así completar dos veces (carreras, 30s, realtime)
+        // no dispara recurrencias duplicadas.
+        let priorStatus = null;
+        if (action === 'complete') {
+          const { data: cur } = await supabase.from('tasks').select('status').eq(col, val).maybeSingle();
+          priorStatus = cur?.status ?? null;
+        }
+
+        // maybeSingle en vez de single: si el UPDATE no toca ninguna fila (RLS lo
+        // bloquea o la tarea ya no existe) queremos un error claro, no el críptico
+        // "Cannot coerce the result to a single JSON object".
+        const { data, error } = await supabase.from('tasks').update(patch).eq(col, val).select(TASK_SELECT).maybeSingle();
         if (error) throw error;
-        // Al completar una tarea repetitiva, generamos la próxima ocurrencia.
-        if (action === 'complete') await maybeCreateRecurrence(data);
+        if (!data) throw new Error('No se pudo actualizar la tarea: no existe o no tenés permiso.');
+
+        if (action === 'complete' && priorStatus !== 'done') await maybeCreateRecurrence(data);
         return data;
       }
     }
